@@ -43,7 +43,7 @@ class PythonExtractor(Extractor):
         for path in py_files:
             rel = _rel(path, self.root)
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+                tree = ast.parse(path.read_text(encoding="utf-8-sig", errors="replace"))
             except SyntaxError:
                 continue
             parsed[rel] = tree

@@ -186,7 +186,11 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         return 2
     render_analysis(graph, analysis)
     print("\n--- AI explanation ---\n")
-    print(explain_impact(analysis, model=args.model))
+    try:
+        print(explain_impact(analysis, model=args.model))
+    except ImportError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     return 0
 
 
