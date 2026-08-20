@@ -1,0 +1,52 @@
+{
+  "nodes": {
+    "model.demo.customer": {
+      "resource_type": "model",
+      "name": "customer",
+      "schema": "analytics",
+      "database": "prod",
+      "original_file_path": "models/customer.sql",
+      "config": {"materialized": "view"},
+      "columns": {"customer_id": {}, "email": {}, "created_at": {}},
+      "depends_on": {"nodes": ["source.demo.raw.customers"]}
+    },
+    "model.demo.dim_customer": {
+      "resource_type": "model",
+      "name": "dim_customer",
+      "schema": "analytics",
+      "database": "prod",
+      "original_file_path": "models/dim_customer.sql",
+      "config": {"materialized": "table"},
+      "columns": {"customer_key": {}, "email": {}},
+      "depends_on": {"nodes": ["model.demo.customer"]}
+    },
+    "model.demo.fact_booking": {
+      "resource_type": "model",
+      "name": "fact_booking",
+      "schema": "analytics",
+      "database": "prod",
+      "original_file_path": "models/fact_booking.sql",
+      "config": {"materialized": "table"},
+      "columns": {"booking_id": {}, "customer_key": {}, "amount": {}},
+      "depends_on": {"nodes": ["model.demo.dim_customer", "source.demo.raw.bookings"]}
+    }
+  },
+  "sources": {
+    "source.demo.raw.customers": {"source_name": "raw", "name": "customers"},
+    "source.demo.raw.bookings": {"source_name": "raw", "name": "bookings"}
+  },
+  "exposures": {
+    "exposure.demo.revenue_report": {
+      "name": "revenue_report",
+      "type": "dashboard",
+      "owner": {"name": "finance"},
+      "depends_on": {"nodes": ["model.demo.fact_booking"]}
+    },
+    "exposure.demo.customer_dashboard": {
+      "name": "customer_dashboard",
+      "type": "dashboard",
+      "owner": {"name": "growth"},
+      "depends_on": {"nodes": ["model.demo.fact_booking"]}
+    }
+  }
+}
