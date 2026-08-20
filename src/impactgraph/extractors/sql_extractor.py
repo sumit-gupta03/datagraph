@@ -47,7 +47,7 @@ class SqlExtractor(Extractor):
             rel = path.relative_to(self.root).as_posix()
             file_id = f"file:{rel}"
             graph.add_node(Node(id=file_id, type=NodeType.FILE, name=rel, path=rel))
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
             try:
                 statements = sqlglot.parse(text, read=self.dialect)
             except Exception:

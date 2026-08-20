@@ -38,7 +38,7 @@ class DbtExtractor(Extractor):
 
     def extract(self) -> ImpactGraph:
         graph = ImpactGraph()
-        manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(self.manifest_path.read_text(encoding="utf-8-sig"))
 
         unique_to_graph_id: Dict[str, str] = {}
 
