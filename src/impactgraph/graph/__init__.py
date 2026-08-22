@@ -1,4 +1,14 @@
-from .model import Edge, EdgeType, Node, NodeType, IMPACT_DIRECTION
-from .graph import ImpactGraph
+from .model import EXTRACTED, INFERRED, IMPACT_DIRECTION, Edge, EdgeType, Node, NodeType
+from .graph import ImpactGraph, diff_graphs
 
-__all__ = ["Edge", "EdgeType", "Node", "NodeType", "IMPACT_DIRECTION", "ImpactGraph"]
+__all__ = [
+    "Edge",
+    "EdgeType",
+    "Node",
+    "NodeType",
+    "IMPACT_DIRECTION",
+    "EXTRACTED",
+    "INFERRED",
+    "ImpactGraph",
+    "diff_graphs",
+]

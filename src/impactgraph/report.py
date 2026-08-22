@@ -9,7 +9,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .analysis import ImpactAnalysis
-from .graph import ImpactGraph
+from .graph import INFERRED, ImpactGraph
 
 _RISK_STYLES = {
     "LOW": "green",
@@ -34,7 +34,7 @@ _ASCII_ICONS = {
     "report": "[rpt] ",
     "api": "[api] ",
     "lambda": "[fn] ",
-    "dag": "[dag] ",
+    "dag": "[job] ",
 }
 
 _TYPE_ICONS = {
@@ -57,9 +57,7 @@ _TYPE_ICONS = {
 }
 
 
-def render_analysis(
-    graph: ImpactGraph, analysis: ImpactAnalysis, console: Console | None = None
-) -> None:
+def render_analysis(graph: ImpactGraph, analysis: ImpactAnalysis, console: Console | None = None) -> None:
     console = console or Console()
     # Legacy / non-UTF-8 terminals (e.g. Windows cp1252) cannot print the
     # Unicode glyphs; fall back to ASCII so the CLI never crashes on output.
@@ -80,11 +78,12 @@ def render_analysis(
     header.append("\nRisk: ", style="bold")
     header.append(f"{risk_level}", style=style)
     header.append(f"  (score {analysis.risk['score']})")
+    if not analysis.include_inferred:
+        header.append("\n(inferred edges excluded)", style="dim")
     console.print(Panel(header, expand=False))
 
     for tree_dict in analysis.trees:
-        rich_tree = _to_rich_tree(tree_dict, icons)
-        console.print(rich_tree)
+        console.print(_to_rich_tree(tree_dict, icons))
         console.print()
 
     counts = analysis.summary_by_type()
@@ -94,9 +93,15 @@ def render_analysis(
             console.print(f"  {count} {type_name.replace('_', ' ')}(s)")
         console.print()
 
+    if analysis.owners:
+        console.print("[bold]Notify (owners of affected artifacts):[/bold]")
+        for owner, names in analysis.owners.items():
+            console.print(f"  {escape(str(owner))}: {escape(', '.join(names))}")
+        console.print()
+
     console.print("[bold]Recommended tests:[/bold]")
     for rec in analysis.recommended_tests:
-        console.print(f"  {tick} {rec}")
+        console.print(f"  {tick} {escape(rec)}")
 
 
 def _to_rich_tree(entry: dict, icons: dict) -> Tree:
@@ -104,7 +109,9 @@ def _to_rich_tree(entry: dict, icons: dict) -> Tree:
     label = f"{escape(icon)}[cyan]{escape(entry['name'])}[/cyan] [dim]({entry.get('type', '?')})[/dim]"
     via = entry.get("via")
     if via:
-        label += f" [dim italic]via {via}[/dim italic]"
+        label += f" [dim italic]via {escape(via)}[/dim italic]"
+    if entry.get("provenance") == INFERRED:
+        label += " [yellow dim](inferred)[/yellow dim]"
     tree = Tree(label)
     for child in entry.get("children", []):
         tree.add(_to_rich_tree(child, icons))

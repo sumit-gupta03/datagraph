@@ -1,0 +1,92 @@
+name: "impactgraph — change impact on pull requests"
+description: "Build the impact graph and post the blast radius of the PR's changes as a comment."
+author: "impactgraph"
+branding:
+  icon: "git-branch"
+  color: "orange"
+
+inputs:
+  repo-path:
+    description: "Path to the Python code to scan"
+    required: false
+    default: "."
+  dbt-manifest:
+    description: "Path to a dbt manifest.json (optional)"
+    required: false
+    default: ""
+  sql-dir:
+    description: "Directory of .sql files (optional)"
+    required: false
+    default: ""
+  openlineage:
+    description: "OpenLineage events file (optional)"
+    required: false
+    default: ""
+  lineage-file:
+    description: "DataHub-style lineage file (optional)"
+    required: false
+    default: ""
+  base-ref:
+    description: "Base ref to diff against"
+    required: false
+    default: "origin/${{ github.base_ref }}"
+  fail-on:
+    description: "Fail the job when risk is at or above this level (LOW|MEDIUM|HIGH|CRITICAL|NONE)"
+    required: false
+    default: "NONE"
+  github-token:
+    description: "Token used to post the PR comment"
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install impactgraph
+      shell: bash
+      run: python -m pip install --quiet "impactgraph[sql,yaml]"
+
+    - name: Build graph
+      shell: bash
+      run: |
+        args="--repo '${{ inputs.repo-path }}'"
+        [ -n "${{ inputs.dbt-manifest }}" ] && args="$args --dbt-manifest '${{ inputs.dbt-manifest }}'"
+        [ -n "${{ inputs.sql-dir }}" ] && args="$args --sql '${{ inputs.sql-dir }}'"
+        [ -n "${{ inputs.openlineage }}" ] && args="$args --openlineage '${{ inputs.openlineage }}'"
+        [ -n "${{ inputs.lineage-file }}" ] && args="$args --lineage-file '${{ inputs.lineage-file }}'"
+        eval impactgraph build $args -o impactgraph.json
+
+    - name: Compute impact of this PR
+      id: impact
+      shell: bash
+      run: |
+        git fetch origin "${{ github.base_ref }}" --depth=1 || true
+        impactgraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph impactgraph.json --json > impact.json || true
+        impactgraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph impactgraph.json > impact.txt 2>/dev/null || true
+        level=$(python -c "import json;print(json.load(open('impact.json')).get('risk',{}).get('level','LOW'))" 2>/dev/null || echo LOW)
+        echo "level=$level" >> "$GITHUB_OUTPUT"
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        {
+          echo "### ⚠ impactgraph — change impact (risk: **${{ steps.impact.outputs.level }}**)"
+          echo
+          echo '```'
+          cat impact.txt
+          echo '```'
+        } > comment.md
+        gh pr comment "${{ github.event.pull_request.number }}" --body-file comment.md || echo "could not post comment"
+
+    - name: Enforce risk threshold
+      shell: bash
+      run: |
+        order="LOW MEDIUM HIGH CRITICAL"
+        threshold="${{ inputs.fail-on }}"
+        [ "$threshold" = "NONE" ] && exit 0
+        idx() { i=0; for l in $order; do [ "$l" = "$1" ] && echo $i && return; i=$((i+1)); done; echo 0; }
+        if [ "$(idx ${{ steps.impact.outputs.level }})" -ge "$(idx $threshold)" ]; then
+          echo "risk ${{ steps.impact.outputs.level }} >= $threshold"; exit 1; fi
