@@ -1,8 +1,13 @@
 """Deterministic SQL lineage extractor built on sqlglot (optional dependency).
 
-Parses ``.sql`` files and emits table/view nodes with DEPENDS_ON edges
-(created relation depends on the relations it selects from), plus COLUMN
-nodes for the output columns of each created relation.
+Parses ``.sql`` files and emits:
+  * table/view nodes with DEPENDS_ON edges (created relation -> relations it
+    selects from),
+  * COLUMN nodes for the output columns of each created relation, and
+  * true column-to-column DEPENDS_ON edges via sqlglot's lineage engine
+    (``analytics.dim_customer.customer_key`` depends on
+    ``raw.customers.customer_id``), so a column change propagates to the exact
+    downstream columns that derive from it — including renamed ones.
 
 Install with: ``pip install impactgraph[sql]``
 """
@@ -10,7 +15,7 @@ Install with: ``pip install impactgraph[sql]``
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
@@ -18,32 +23,31 @@ from .base import Extractor
 try:
     import sqlglot
     from sqlglot import exp
+    from sqlglot.lineage import lineage as _sqlglot_lineage
 
     HAS_SQLGLOT = True
 except ImportError:  # pragma: no cover
     HAS_SQLGLOT = False
 
 
+def _require_sqlglot() -> None:
+    if not HAS_SQLGLOT:
+        raise ImportError(
+            "sqlglot is required for SQL lineage. Install it with: pip install impactgraph[sql]"
+        )
+
+
 class SqlExtractor(Extractor):
     name = "sql"
 
-    def __init__(
-        self,
-        root: Union[str, Path],
-        dialect: Optional[str] = None,
-    ) -> None:
-        if not HAS_SQLGLOT:
-            raise ImportError(
-                "sqlglot is required for SQL extraction. "
-                "Install it with: pip install impactgraph[sql]"
-            )
+    def __init__(self, root: Union[str, Path], dialect: Optional[str] = None) -> None:
+        _require_sqlglot()
         self.root = Path(root).resolve()
         self.dialect = dialect
 
     def extract(self) -> ImpactGraph:
         graph = ImpactGraph()
-        sql_files = sorted(self.root.rglob("*.sql"))
-        for path in sql_files:
+        for path in sorted(self.root.rglob("*.sql")):
             rel = path.relative_to(self.root).as_posix()
             file_id = f"file:{rel}"
             graph.add_node(Node(id=file_id, type=NodeType.FILE, name=rel, path=rel))
@@ -53,9 +57,8 @@ class SqlExtractor(Extractor):
             except Exception:
                 continue
             for stmt in statements:
-                if stmt is None:
-                    continue
-                self._extract_statement(graph, stmt, file_id)
+                if stmt is not None:
+                    self._extract_statement(graph, stmt, file_id)
         return graph
 
     def _extract_statement(self, graph: ImpactGraph, stmt, file_id: str) -> None:
@@ -64,60 +67,48 @@ class SqlExtractor(Extractor):
             if target is None:
                 return
             kind = (stmt.args.get("kind") or "table").lower()
-            target_id = _table_id(target)
+            target_name = table_name(target)
+            target_id = "table:" + target_name.lower()
             graph.add_node(
-                Node(
-                    id=target_id,
-                    type=NodeType.VIEW if kind == "view" else NodeType.TABLE,
-                    name=_table_name(target),
-                )
+                Node(id=target_id, type=NodeType.VIEW if kind == "view" else NodeType.TABLE, name=target_name)
             )
             graph.add_edge(Edge(src=file_id, dst=target_id, type=EdgeType.CONTAINS))
-
-            select = stmt.find(exp.Select)
-            if select is not None:
-                cte_names = {
-                    cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)
-                }
-                for source in _source_tables(stmt, exclude=cte_names | {_table_name(target).lower()}):
-                    graph.add_edge(
-                        Edge(src=target_id, dst=source, type=EdgeType.DEPENDS_ON)
-                    )
-                for col in _output_columns(select):
-                    col_id = f"column:{_table_name(target)}.{col}"
-                    graph.add_node(
-                        Node(id=col_id, type=NodeType.COLUMN, name=col, meta={"parent": target_id})
-                    )
-                    graph.add_edge(Edge(src=target_id, dst=col_id, type=EdgeType.CONTAINS))
+            query = stmt.expression
+            if query is None or query.find(exp.Select) is None:
+                return
+            cte_names = {cte.alias_or_name.lower() for cte in stmt.find_all(exp.CTE)}
+            for source in source_tables(stmt, exclude=cte_names | {target_name.lower()}):
+                graph.add_edge(Edge(src=target_id, dst=source, type=EdgeType.DEPENDS_ON))
+            add_column_lineage(graph, target_id, target_name, query, self.dialect)
 
         elif isinstance(stmt, exp.Insert):
             target = stmt.find(exp.Table)
             if target is None:
                 return
-            target_id = _table_id(target)
-            graph.add_node(
-                Node(id=target_id, type=NodeType.TABLE, name=_table_name(target))
-            )
-            for source in _source_tables(stmt, exclude={_table_name(target).lower()}):
+            target_name = table_name(target)
+            target_id = "table:" + target_name.lower()
+            graph.add_node(Node(id=target_id, type=NodeType.TABLE, name=target_name))
+            for source in source_tables(stmt, exclude={target_name.lower()}):
                 graph.add_edge(Edge(src=target_id, dst=source, type=EdgeType.DEPENDS_ON))
+            query = stmt.expression
+            if query is not None and query.find(exp.Select) is not None:
+                add_column_lineage(graph, target_id, target_name, query, self.dialect)
 
 
-def _table_name(table: "exp.Table") -> str:
+# ----------------------------------------------------------------- helpers
+
+
+def table_name(table: "exp.Table") -> str:
     parts = [p.name for p in (table.args.get("catalog"), table.args.get("db")) if p]
     parts.append(table.name)
     return ".".join(parts)
 
 
-def _table_id(table: "exp.Table") -> str:
-    return "table:" + _table_name(table).lower()
-
-
-def _source_tables(stmt, exclude=frozenset()) -> List[str]:
-    out = []
-    seen = set()
+def source_tables(stmt, exclude=frozenset()) -> List[str]:
+    out, seen = [], set()
     for table in stmt.find_all(exp.Table):
-        name = _table_name(table)
-        if name.lower() in exclude:
+        name = table_name(table)
+        if name.lower() in exclude or not table.name:
             continue
         tid = "table:" + name.lower()
         if tid not in seen:
@@ -126,7 +117,10 @@ def _source_tables(stmt, exclude=frozenset()) -> List[str]:
     return out
 
 
-def _output_columns(select: "exp.Select") -> List[str]:
+def output_columns(query) -> List[str]:
+    select = query if isinstance(query, exp.Select) else query.find(exp.Select)
+    if select is None:
+        return []
     cols: List[str] = []
     for projection in select.expressions:
         if isinstance(projection, exp.Star):
@@ -135,3 +129,77 @@ def _output_columns(select: "exp.Select") -> List[str]:
         if name and name != "*":
             cols.append(name)
     return cols
+
+
+def column_lineage(query, dialect: Optional[str] = None) -> Dict[str, List[Tuple[str, str]]]:
+    """Map each output column of ``query`` to its source (table_name, column) leaves.
+
+    Uses sqlglot's lineage engine; CTEs and aliases are resolved. Returns an
+    empty mapping for columns it cannot trace (e.g. SELECT *).
+    """
+    _require_sqlglot()
+    result: Dict[str, List[Tuple[str, str]]] = {}
+    for col in output_columns(query):
+        try:
+            node = _sqlglot_lineage(col, query, dialect=dialect)
+        except Exception:
+            continue
+        sources: List[Tuple[str, str]] = []
+        for leaf in node.walk():
+            if leaf.downstream:
+                continue
+            src = leaf.source
+            if isinstance(src, exp.Table) and src.name:
+                src_col = leaf.name.split(".")[-1].strip('"')
+                if src_col and src_col != "*":
+                    pair = (table_name(src), src_col)
+                    if pair not in sources:
+                        sources.append(pair)
+        if sources:
+            result[col] = sources
+    return result
+
+
+def add_column_lineage(
+    graph: ImpactGraph,
+    target_id: str,
+    target_name: str,
+    query,
+    dialect: Optional[str] = None,
+    resolve_relation=None,
+) -> int:
+    """Emit COLUMN nodes and column->column DEPENDS_ON edges for ``query``.
+
+    ``resolve_relation(table_name_lower) -> (node_id, display_name)`` lets the
+    dbt extractor map relation names in compiled SQL back to model/source
+    nodes; by default relations map to ``table:<name>`` nodes.
+    Returns the number of column edges added.
+    """
+    added = 0
+    # Column ids are lower-cased: SQL identifiers are case-insensitive in most
+    # warehouses and sqlglot normalizes them per dialect (Snowflake -> UPPER).
+    for out_col in output_columns(query):
+        col_id = f"column:{_bare(target_id)}.{out_col.lower()}"
+        graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=out_col.lower(), meta={"parent": target_id}))
+        graph.add_edge(Edge(src=target_id, dst=col_id, type=EdgeType.CONTAINS))
+    for out_col, sources in column_lineage(query, dialect).items():
+        col_id = f"column:{_bare(target_id)}.{out_col.lower()}"
+        for src_table, src_col in sources:
+            if resolve_relation is not None:
+                resolved = resolve_relation(src_table.lower())
+                if resolved is None:
+                    continue
+                parent_id, _display = resolved
+            else:
+                parent_id = "table:" + src_table.lower()
+            src_col_id = f"column:{_bare(parent_id)}.{src_col.lower()}"
+            graph.add_node(Node(id=src_col_id, type=NodeType.COLUMN, name=src_col.lower(), meta={"parent": parent_id}))
+            graph.add_edge(Edge(src=parent_id, dst=src_col_id, type=EdgeType.CONTAINS))
+            graph.add_edge(Edge(src=col_id, dst=src_col_id, type=EdgeType.DEPENDS_ON, meta={"via": "sql"}))
+            added += 1
+    return added
+
+
+def _bare(node_id: str) -> str:
+    """'table:prod.analytics.x' -> 'prod.analytics.x'; 'dbt:customer' -> 'customer'."""
+    return node_id.split(":", 1)[1] if ":" in node_id else node_id

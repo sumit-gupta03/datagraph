@@ -8,7 +8,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import networkx as nx
 
-from .model import IMPACT_DIRECTION, Edge, EdgeType, Node, NodeType
+from .model import EXTRACTED, IMPACT_DIRECTION, INFERRED, Edge, EdgeType, Node, NodeType
 
 
 class ImpactGraph:
@@ -17,6 +17,11 @@ class ImpactGraph:
     Nodes are files, functions, dbt models, tables, columns, dashboards, etc.
     Edges carry semantic types (CONTAINS, CALLS, DEPENDS_ON, ...) and the
     impact traversal knows in which direction change propagates for each type.
+
+    Every edge has a provenance in ``edge.meta["provenance"]``: ``"extracted"``
+    (read directly from an artifact — manifest DAG, AST containment, SQL
+    lineage) or ``"inferred"`` (a heuristic such as name-based call
+    resolution). Traversals can exclude inferred edges.
     """
 
     def __init__(self) -> None:
@@ -27,22 +32,24 @@ class ImpactGraph:
     def add_node(self, node: Node) -> Node:
         existing = self._g.nodes.get(node.id)
         if existing is not None:
-            # merge metadata, keep first-seen identity
-            existing["node"].meta.update(node.meta)
+            existing["node"].meta.update({k: v for k, v in node.meta.items() if v is not None})
+            if existing["node"].path is None and node.path:
+                existing["node"].path = node.path
             return existing["node"]
         self._g.add_node(node.id, node=node)
         return node
 
     def add_edge(self, edge: Edge) -> None:
-        # ensure endpoints exist as placeholder nodes if not added yet
         for nid in (edge.src, edge.dst):
             if nid not in self._g:
-                inferred = _infer_node_from_id(nid)
-                self._g.add_node(nid, node=inferred)
-        # avoid duplicate identical edges
+                self._g.add_node(nid, node=_infer_node_from_id(nid))
+        edge.meta.setdefault("provenance", EXTRACTED)
         if self._g.has_edge(edge.src, edge.dst):
             for _, data in self._g[edge.src][edge.dst].items():
                 if data["edge"].type == edge.type:
+                    # keep the strongest provenance
+                    if data["edge"].meta.get("provenance") == INFERRED and edge.meta.get("provenance") == EXTRACTED:
+                        data["edge"].meta["provenance"] = EXTRACTED
                     return
         self._g.add_edge(edge.src, edge.dst, edge=edge)
 
@@ -73,8 +80,12 @@ class ImpactGraph:
     def edges(self) -> List[Edge]:
         return [d["edge"] for _, _, d in self._g.edges(data=True)]
 
+    def edges_of(self, node_id: str) -> List[Edge]:
+        out = [d["edge"] for _, _, d in self._g.out_edges(node_id, data=True)]
+        out += [d["edge"] for _, _, d in self._g.in_edges(node_id, data=True)]
+        return out
+
     def find(self, query: str) -> List[Node]:
-        """Find nodes whose id, name, or path contains the query (case-insensitive)."""
         q = query.lower()
         return [
             n
@@ -87,7 +98,8 @@ class ImpactGraph:
     def resolve(self, ref: str) -> Optional[Node]:
         """Resolve a user-supplied reference to a single node.
 
-        Tries exact id, then exact name, then unique substring match.
+        Order: exact id, exact name, exact path, the file node on that path,
+        unique substring match.
         """
         node = self.get_node(ref)
         if node:
@@ -98,7 +110,6 @@ class ImpactGraph:
         by_path = [n for n in self.nodes() if n.path == ref]
         if len(by_path) == 1:
             return by_path[0]
-        # a file node whose path matches wins over things defined in that file
         file_nodes = [n for n in by_path if n.type == NodeType.FILE]
         if len(file_nodes) == 1:
             return file_nodes[0]
@@ -109,19 +120,24 @@ class ImpactGraph:
 
     # --------------------------------------------------------------- traversal
 
-    def _affected_neighbors(self, node_id: str) -> Iterable[Tuple[str, Edge]]:
+    def _affected_neighbors(
+        self, node_id: str, include_inferred: bool = True
+    ) -> Iterable[Tuple[str, Edge]]:
         """Nodes affected when ``node_id`` changes, honoring per-type direction."""
         for _, dst, data in self._g.out_edges(node_id, data=True):
             edge: Edge = data["edge"]
+            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+                continue
             if IMPACT_DIRECTION[edge.type] == "forward":
                 yield dst, edge
         for src, _, data in self._g.in_edges(node_id, data=True):
             edge = data["edge"]
+            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+                continue
             if IMPACT_DIRECTION[edge.type] == "reverse":
                 yield src, edge
 
     def _column_parent(self, node_id: str) -> Optional[str]:
-        """Owning model/table of a COLUMN node (via its incoming CONTAINS edge)."""
         node = self.get_node(node_id)
         if node is None or node.type != NodeType.COLUMN:
             return None
@@ -139,30 +155,22 @@ class ImpactGraph:
         seen: Set[str],
         max_depth: Optional[int],
         column_filter: Optional[str] = None,
+        include_inferred: bool = True,
     ) -> Dict[str, int]:
-        """Generic impact BFS from (node, depth) seeds.
-
-        ``column_filter``: when set, COLUMN children reached via CONTAINS are
-        only included if their name matches — used for column-level changes so
-        a renamed ``customer_id`` lights up ``customer_id`` downstream, not every
-        column of every downstream model.
-        """
         depths: Dict[str, int] = {}
-        frontier: Dict[str, int] = {}
-        for nid, d in starts:
-            frontier[nid] = d
+        frontier: Dict[str, int] = dict(starts)
         while frontier:
             next_frontier: Dict[str, int] = {}
             for nid, d in frontier.items():
                 nd = d + 1
                 if max_depth is not None and nd > max_depth:
                     continue
-                for affected, edge in self._affected_neighbors(nid):
+                for affected, edge in self._affected_neighbors(nid, include_inferred):
                     if affected in seen:
                         continue
                     if column_filter is not None and edge.type == EdgeType.CONTAINS:
                         child = self.get_node(affected)
-                        if child is not None and child.type == NodeType.COLUMN and child.name != column_filter:
+                        if child is not None and child.type == NodeType.COLUMN and child.name.lower() != column_filter.lower():
                             continue
                     seen.add(affected)
                     depths[affected] = nd
@@ -171,15 +179,17 @@ class ImpactGraph:
         return depths
 
     def impact(
-        self, changed: Union[str, Iterable[str]], max_depth: Optional[int] = None
+        self,
+        changed: Union[str, Iterable[str]],
+        max_depth: Optional[int] = None,
+        include_inferred: bool = True,
     ) -> Dict[str, int]:
-        """Blast radius of one or more changed nodes.
+        """Blast radius of one or more changed nodes: affected id -> min depth.
 
-        Returns a mapping of affected node id -> minimum propagation depth
-        (1 = directly affected). The changed nodes themselves are excluded.
-
-        Column changes propagate through the owning model/table to everything
-        downstream of it, and to same-named columns in downstream relations.
+        Column changes follow true column-to-column lineage edges when the
+        extractors produced them, and additionally propagate through the owning
+        model/table to its downstream, flagging same-named downstream columns
+        (a rename heuristic marked as inferred in trees).
         """
         if isinstance(changed, str):
             changed = [changed]
@@ -187,32 +197,33 @@ class ImpactGraph:
         result: Dict[str, int] = {}
         for root in roots:
             seen: Set[str] = set(roots)
+            local = self._bfs([(root, 0)], seen, max_depth, include_inferred=include_inferred)
             parent = self._column_parent(root)
             if parent is not None:
                 col_name = self.get_node(root).name
-                local: Dict[str, int] = {}
                 if parent not in seen and (max_depth is None or max_depth >= 1):
                     local[parent] = 1
                 seen.add(parent)
-                local.update(self._bfs([(parent, 1)], seen, max_depth, column_filter=col_name))
-            else:
-                local = self._bfs([(root, 0)], seen, max_depth)
+                local.update(
+                    self._bfs([(parent, 1)], seen, max_depth, column_filter=col_name, include_inferred=include_inferred)
+                )
             for nid, d in local.items():
                 if nid not in result or d < result[nid]:
                     result[nid] = d
         return result
 
-    def impact_paths(self, changed: str, target: str) -> List[List[str]]:
-        """All simple propagation paths from a changed node to a target node."""
+    def impact_paths(self, changed: str, target: str, cutoff: int = 25) -> List[List[str]]:
         h = self._impact_digraph()
         if changed not in h or target not in h:
             return []
         try:
-            return [list(p) for p in nx.all_simple_paths(h, changed, target, cutoff=25)]
+            return [list(p) for p in nx.all_simple_paths(h, changed, target, cutoff=cutoff)]
         except nx.NetworkXNoPath:
             return []
 
-    def impact_tree(self, changed: str, max_depth: Optional[int] = None) -> Dict:
+    def impact_tree(
+        self, changed: str, max_depth: Optional[int] = None, include_inferred: bool = True
+    ) -> Dict:
         """Nested dict tree of the blast radius, suitable for rendering."""
         seen: Set[str] = {changed}
         column_filter: Optional[str] = None
@@ -230,57 +241,136 @@ class ImpactGraph:
             entry = entry_for(nid)
             if max_depth is not None and depth >= max_depth:
                 return entry
-            for affected, edge in self._affected_neighbors(nid):
+            for affected, edge in self._affected_neighbors(nid, include_inferred):
                 if affected in seen:
                     continue
+                heuristic = False
                 if column_filter is not None and edge.type == EdgeType.CONTAINS:
                     child_node = self.get_node(affected)
-                    if child_node is not None and child_node.type == NodeType.COLUMN and child_node.name != column_filter:
-                        continue
+                    if child_node is not None and child_node.type == NodeType.COLUMN:
+                        if child_node.name.lower() != column_filter.lower():
+                            continue
+                        heuristic = True
                 seen.add(affected)
                 child = build(affected, depth + 1)
                 child["via"] = edge.type.value
+                child["provenance"] = INFERRED if heuristic else edge.meta.get("provenance", EXTRACTED)
+                if heuristic:
+                    child["via"] = "same-name column"
                 entry["children"].append(child)
             return entry
 
         parent = self._column_parent(changed)
+        root = build(changed, 0)  # follows true column-lineage edges if present
         if parent is None:
-            return build(changed, 0)
-
-        # Column change: column -> owning model/table -> downstream (same-named columns only)
+            return root
         column_filter = self.get_node(changed).name
-        root = entry_for(changed)
-        seen.add(parent)
-        parent_entry = build(parent, 1)
-        parent_entry["via"] = "contains"
-        root["children"].append(parent_entry)
+        if parent not in seen:
+            seen.add(parent)
+            parent_entry = build(parent, 1)
+            parent_entry["via"] = "contains"
+            parent_entry["provenance"] = EXTRACTED
+            root["children"].append(parent_entry)
         return root
 
-    def _impact_digraph(self) -> nx.DiGraph:
-        """Plain DiGraph whose edges all point in the direction impact flows."""
+    def _impact_digraph(self, include_inferred: bool = True) -> nx.DiGraph:
         h = nx.DiGraph()
         h.add_nodes_from(self._g.nodes)
         for src, dst, data in self._g.edges(data=True):
             edge: Edge = data["edge"]
+            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+                continue
             if IMPACT_DIRECTION[edge.type] == "forward":
-                h.add_edge(src, dst)
+                h.add_edge(src, dst, type=edge.type.value)
             else:
-                h.add_edge(dst, src)
+                h.add_edge(dst, src, type=edge.type.value)
         return h
+
+    # ---------------------------------------------------------------- insight
+
+    def hotspots(self, top: int = 10, include_inferred: bool = True) -> List[Dict]:
+        """Nodes with the largest blast radius — the places a change hurts most."""
+        rows = []
+        for node in self.nodes():
+            if node.type == NodeType.COLUMN:
+                continue
+            affected = self.impact(node.id, include_inferred=include_inferred)
+            rows.append(
+                {
+                    "id": node.id,
+                    "name": node.name,
+                    "type": node.type.value,
+                    "blast_radius": len(affected),
+                    "in_degree": self._g.in_degree(node.id),
+                    "out_degree": self._g.out_degree(node.id),
+                }
+            )
+        rows.sort(key=lambda r: (-r["blast_radius"], -(r["in_degree"] + r["out_degree"]), r["id"]))
+        return rows[:top]
+
+    def subgraph(self, node_ids: Iterable[str]) -> "ImpactGraph":
+        ids = set(node_ids)
+        sub = ImpactGraph()
+        for nid in ids:
+            node = self.get_node(nid)
+            if node:
+                sub.add_node(node)
+        for edge in self.edges():
+            if edge.src in ids and edge.dst in ids:
+                sub.add_edge(edge)
+        return sub
+
+    # ---------------------------------------------------------------- exports
+
+    def _plain_digraph(self) -> nx.DiGraph:
+        h = nx.DiGraph()
+        for node in self.nodes():
+            h.add_node(node.id, name=node.name, type=node.type.value, path=node.path or "")
+        for edge in self.edges():
+            h.add_edge(edge.src, edge.dst, type=edge.type.value, provenance=edge.meta.get("provenance", EXTRACTED))
+        return h
+
+    def to_graphml(self, path: Union[str, Path]) -> None:
+        nx.write_graphml(self._plain_digraph(), str(path))
+
+    def to_dot(self) -> str:
+        lines = ["digraph impactgraph {", "  rankdir=LR;", "  node [shape=box, fontname=Helvetica];"]
+        for node in self.nodes():
+            lines.append(f'  "{_esc(node.id)}" [label="{_esc(node.name)}\\n({node.type.value})"];')
+        for edge in self.edges():
+            style = ', style=dashed' if edge.meta.get("provenance") == INFERRED else ""
+            lines.append(f'  "{_esc(edge.src)}" -> "{_esc(edge.dst)}" [label="{edge.type.value}"{style}];')
+        lines.append("}")
+        return "\n".join(lines)
+
+    def to_cypher(self) -> str:
+        out = []
+        for node in self.nodes():
+            label = "".join(p.capitalize() for p in node.type.value.split("_"))
+            out.append(
+                f"MERGE (n:{label} {{id: '{_esc(node.id)}'}}) SET n.name = '{_esc(node.name)}'"
+                + (f", n.path = '{_esc(node.path)}'" if node.path else "")
+                + ";"
+            )
+        for edge in self.edges():
+            rel = edge.type.value.upper()
+            out.append(
+                f"MATCH (a {{id: '{_esc(edge.src)}'}}), (b {{id: '{_esc(edge.dst)}'}}) "
+                f"MERGE (a)-[:{rel} {{provenance: '{edge.meta.get('provenance', EXTRACTED)}'}}]->(b);"
+            )
+        return "\n".join(out)
 
     # ------------------------------------------------------------ persistence
 
     def to_dict(self) -> Dict:
         return {
-            "version": 1,
+            "version": 2,
             "nodes": [n.to_dict() for n in self.nodes()],
             "edges": [e.to_dict() for e in self.edges()],
         }
 
     def save(self, path: Union[str, Path]) -> None:
-        Path(path).write_text(
-            json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8"
-        )
+        Path(path).write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
 
     @classmethod
     def from_dict(cls, d: Dict) -> "ImpactGraph":
@@ -293,11 +383,32 @@ class ImpactGraph:
 
     @classmethod
     def load(cls, path: Union[str, Path]) -> "ImpactGraph":
-        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+
+
+def diff_graphs(old: ImpactGraph, new: ImpactGraph) -> Dict:
+    """Schema / dependency drift between two graph snapshots."""
+    old_nodes = {n.id: n for n in old.nodes()}
+    new_nodes = {n.id: n for n in new.nodes()}
+    old_edges = {(e.src, e.dst, e.type.value) for e in old.edges()}
+    new_edges = {(e.src, e.dst, e.type.value) for e in new.edges()}
+    added_nodes = sorted(set(new_nodes) - set(old_nodes))
+    removed_nodes = sorted(set(old_nodes) - set(new_nodes))
+    return {
+        "added_nodes": [new_nodes[i].to_dict() for i in added_nodes],
+        "removed_nodes": [old_nodes[i].to_dict() for i in removed_nodes],
+        "added_edges": [{"src": s, "dst": d, "type": t} for s, d, t in sorted(new_edges - old_edges)],
+        "removed_edges": [{"src": s, "dst": d, "type": t} for s, d, t in sorted(old_edges - new_edges)],
+        "removed_columns": [i for i in removed_nodes if old_nodes[i].type == NodeType.COLUMN],
+        "added_columns": [i for i in added_nodes if new_nodes[i].type == NodeType.COLUMN],
+    }
+
+
+def _esc(s: Optional[str]) -> str:
+    return (s or "").replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
 
 
 def _infer_node_from_id(node_id: str) -> Node:
-    """Best-effort node for an id referenced by an edge before being declared."""
     prefix, _, rest = node_id.partition(":")
     type_map = {
         "file": NodeType.FILE,
@@ -312,7 +423,13 @@ def _infer_node_from_id(node_id: str) -> Node:
         "api": NodeType.API,
         "lambda": NodeType.LAMBDA,
         "report": NodeType.REPORT,
+        "job": NodeType.DAG,
+        "dag": NodeType.DAG,
     }
     ntype = type_map.get(prefix, NodeType.TABLE)
     name = rest.split("::")[-1] if rest else node_id
-    return Node(id=node_id, type=ntype, name=name or node_id)
+    meta = {}
+    if ntype == NodeType.COLUMN and "." in rest:
+        parent_name, _, _col = rest.rpartition(".")
+        meta["parent_hint"] = parent_name
+    return Node(id=node_id, type=ntype, name=name or node_id, meta=meta)

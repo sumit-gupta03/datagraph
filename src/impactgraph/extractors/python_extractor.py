@@ -11,7 +11,7 @@ import ast
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
+from ..graph import INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
 
 _SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".tox", "dist", "build"}
@@ -87,8 +87,14 @@ class PythonExtractor(Extractor):
                     continue
                 for callee_id in func_index.get(callee_name, []):
                     if callee_id != caller_id:
+                        # name-based resolution: mark as inferred so it can be excluded
                         graph.add_edge(
-                            Edge(src=caller_id, dst=callee_id, type=EdgeType.CALLS)
+                            Edge(
+                                src=caller_id,
+                                dst=callee_id,
+                                type=EdgeType.CALLS,
+                                meta={"provenance": INFERRED, "reason": "resolved by function name"},
+                            )
                         )
         return graph
 

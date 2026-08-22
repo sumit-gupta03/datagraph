@@ -1,4 +1,4 @@
-"""High-level impact analysis: blast radius + risk + test plan in one call."""
+"""High-level impact analysis: blast radius + risk + owners + test plan in one call."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ class ImpactAnalysis:
     risk: Dict  # {"score": float, "level": str}
     recommended_tests: List[str]
     trees: List[Dict] = field(default_factory=list)
+    owners: Dict[str, List[str]] = field(default_factory=dict)  # owner -> affected node names
+    include_inferred: bool = True
     _graph: Optional[ImpactGraph] = None
 
     def summary_by_type(self) -> Dict[str, int]:
@@ -35,7 +37,9 @@ class ImpactAnalysis:
             "affected": self.affected,
             "affected_by_type": self.summary_by_type(),
             "risk": self.risk,
+            "owners": self.owners,
             "recommended_tests": self.recommended_tests,
+            "include_inferred": self.include_inferred,
             "trees": self.trees,
         }
 
@@ -44,25 +48,38 @@ def analyze_impact(
     graph: ImpactGraph,
     changed: List[str],
     max_depth: Optional[int] = None,
+    include_inferred: bool = True,
 ) -> ImpactAnalysis:
-    """Compute the blast radius, risk level, and test plan for changed nodes."""
+    """Compute the blast radius, risk level, owners to notify, and test plan."""
     resolved: List[str] = []
     for ref in changed:
         node = graph.resolve(ref)
         if node is not None:
-            resolved.append(node.id)
-        elif ref in graph:
+            if node.id not in resolved:
+                resolved.append(node.id)
+        elif ref in graph and ref not in resolved:
             resolved.append(ref)
 
-    affected = graph.impact(resolved, max_depth=max_depth)
+    affected = graph.impact(resolved, max_depth=max_depth, include_inferred=include_inferred)
     risk = risk_score(graph, affected)
     tests = recommend_tests(graph, affected)
-    trees = [graph.impact_tree(nid, max_depth=max_depth) for nid in resolved]
+    trees = [graph.impact_tree(nid, max_depth=max_depth, include_inferred=include_inferred) for nid in resolved]
+
+    owners: Dict[str, List[str]] = {}
+    for nid in affected:
+        node = graph.get_node(nid)
+        if node and node.owner:
+            owners.setdefault(str(node.owner), []).append(node.name)
+    for k in owners:
+        owners[k] = sorted(set(owners[k]))
+
     return ImpactAnalysis(
         changed=resolved,
         affected=affected,
         risk=risk,
         recommended_tests=tests,
         trees=trees,
+        owners=dict(sorted(owners.items())),
+        include_inferred=include_inferred,
         _graph=graph,
     )
