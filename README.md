@@ -155,7 +155,7 @@ Now a change to a dbt model propagates all the way into your Python API — and 
 ## GitHub Action — impact comment on every PR
 
 ```yaml
-- uses: <your-github-user>/impactgraph@main
+- uses: sumit-gupta03/impactgraph@main
   with:
     repo-path: src
     dbt-manifest: target/manifest.json
