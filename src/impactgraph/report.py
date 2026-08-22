@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 from rich.tree import Tree
@@ -100,7 +101,7 @@ def render_analysis(
 
 def _to_rich_tree(entry: dict, icons: dict) -> Tree:
     icon = icons.get(entry.get("type", ""), "- ")
-    label = f"{icon}[cyan]{entry['name']}[/cyan] [dim]({entry.get('type', '?')})[/dim]"
+    label = f"{escape(icon)}[cyan]{escape(entry['name'])}[/cyan] [dim]({entry.get('type', '?')})[/dim]"
     via = entry.get("via")
     if via:
         label += f" [dim italic]via {via}[/dim italic]"
