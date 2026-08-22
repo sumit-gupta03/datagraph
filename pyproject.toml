@@ -51,7 +51,7 @@ dev = ["pytest>=7.0", "sqlglot>=20.0", "pyyaml>=6.0"]
 impactgraph = "impactgraph.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aratiemails/impactgraph"
+Homepage = "https://github.com/sumit-gupta03/impactgraph"
 
 [tool.setuptools.packages.find]
 where = ["src"]

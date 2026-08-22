@@ -6,7 +6,7 @@ bug fixes, docs, and real-world feedback on the impact model.
 ## Getting started
 
 ```bash
-git clone https://github.com/<owner>/impactgraph
+git clone https://github.com/sumit-gupta03/impactgraph
 cd impactgraph
 python -m venv .venv && . .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"

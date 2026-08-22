@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       # Build your dbt manifest first if you want data lineage, e.g.:
       # - run: pip install dbt-core dbt-snowflake && dbt compile
-      - uses: <your-github-user>/impactgraph@main
+      - uses: sumit-gupta03/impactgraph@main
         with:
           repo-path: src
           dbt-manifest: target/manifest.json
