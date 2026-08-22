@@ -120,34 +120,87 @@ class ImpactGraph:
             if IMPACT_DIRECTION[edge.type] == "reverse":
                 yield src, edge
 
+    def _column_parent(self, node_id: str) -> Optional[str]:
+        """Owning model/table of a COLUMN node (via its incoming CONTAINS edge)."""
+        node = self.get_node(node_id)
+        if node is None or node.type != NodeType.COLUMN:
+            return None
+        parent = node.meta.get("parent")
+        if parent and parent in self._g:
+            return parent
+        for src, _, data in self._g.in_edges(node_id, data=True):
+            if data["edge"].type == EdgeType.CONTAINS:
+                return src
+        return None
+
+    def _bfs(
+        self,
+        starts: Iterable[Tuple[str, int]],
+        seen: Set[str],
+        max_depth: Optional[int],
+        column_filter: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Generic impact BFS from (node, depth) seeds.
+
+        ``column_filter``: when set, COLUMN children reached via CONTAINS are
+        only included if their name matches — used for column-level changes so
+        a renamed ``customer_id`` lights up ``customer_id`` downstream, not every
+        column of every downstream model.
+        """
+        depths: Dict[str, int] = {}
+        frontier: Dict[str, int] = {}
+        for nid, d in starts:
+            frontier[nid] = d
+        while frontier:
+            next_frontier: Dict[str, int] = {}
+            for nid, d in frontier.items():
+                nd = d + 1
+                if max_depth is not None and nd > max_depth:
+                    continue
+                for affected, edge in self._affected_neighbors(nid):
+                    if affected in seen:
+                        continue
+                    if column_filter is not None and edge.type == EdgeType.CONTAINS:
+                        child = self.get_node(affected)
+                        if child is not None and child.type == NodeType.COLUMN and child.name != column_filter:
+                            continue
+                    seen.add(affected)
+                    depths[affected] = nd
+                    next_frontier[affected] = nd
+            frontier = next_frontier
+        return depths
+
     def impact(
         self, changed: Union[str, Iterable[str]], max_depth: Optional[int] = None
     ) -> Dict[str, int]:
-        """BFS over the blast radius of one or more changed nodes.
+        """Blast radius of one or more changed nodes.
 
         Returns a mapping of affected node id -> minimum propagation depth
         (1 = directly affected). The changed nodes themselves are excluded.
+
+        Column changes propagate through the owning model/table to everything
+        downstream of it, and to same-named columns in downstream relations.
         """
         if isinstance(changed, str):
             changed = [changed]
         roots = [c for c in changed if c in self._g]
-        depths: Dict[str, int] = {}
-        frontier: Set[str] = set(roots)
-        seen: Set[str] = set(roots)
-        depth = 0
-        while frontier:
-            depth += 1
-            if max_depth is not None and depth > max_depth:
-                break
-            next_frontier: Set[str] = set()
-            for nid in frontier:
-                for affected, _edge in self._affected_neighbors(nid):
-                    if affected not in seen:
-                        seen.add(affected)
-                        depths[affected] = depth
-                        next_frontier.add(affected)
-            frontier = next_frontier
-        return depths
+        result: Dict[str, int] = {}
+        for root in roots:
+            seen: Set[str] = set(roots)
+            parent = self._column_parent(root)
+            if parent is not None:
+                col_name = self.get_node(root).name
+                local: Dict[str, int] = {}
+                if parent not in seen and (max_depth is None or max_depth >= 1):
+                    local[parent] = 1
+                seen.add(parent)
+                local.update(self._bfs([(parent, 1)], seen, max_depth, column_filter=col_name))
+            else:
+                local = self._bfs([(root, 0)], seen, max_depth)
+            for nid, d in local.items():
+                if nid not in result or d < result[nid]:
+                    result[nid] = d
+        return result
 
     def impact_paths(self, changed: str, target: str) -> List[List[str]]:
         """All simple propagation paths from a changed node to a target node."""
@@ -162,27 +215,46 @@ class ImpactGraph:
     def impact_tree(self, changed: str, max_depth: Optional[int] = None) -> Dict:
         """Nested dict tree of the blast radius, suitable for rendering."""
         seen: Set[str] = {changed}
+        column_filter: Optional[str] = None
 
-        def build(nid: str, depth: int) -> Dict:
+        def entry_for(nid: str) -> Dict:
             node = self.get_node(nid)
-            entry: Dict = {
+            return {
                 "id": nid,
                 "name": node.name if node else nid,
                 "type": node.type.value if node else "unknown",
                 "children": [],
             }
+
+        def build(nid: str, depth: int) -> Dict:
+            entry = entry_for(nid)
             if max_depth is not None and depth >= max_depth:
                 return entry
             for affected, edge in self._affected_neighbors(nid):
                 if affected in seen:
                     continue
+                if column_filter is not None and edge.type == EdgeType.CONTAINS:
+                    child_node = self.get_node(affected)
+                    if child_node is not None and child_node.type == NodeType.COLUMN and child_node.name != column_filter:
+                        continue
                 seen.add(affected)
                 child = build(affected, depth + 1)
                 child["via"] = edge.type.value
                 entry["children"].append(child)
             return entry
 
-        return build(changed, 0)
+        parent = self._column_parent(changed)
+        if parent is None:
+            return build(changed, 0)
+
+        # Column change: column -> owning model/table -> downstream (same-named columns only)
+        column_filter = self.get_node(changed).name
+        root = entry_for(changed)
+        seen.add(parent)
+        parent_entry = build(parent, 1)
+        parent_entry["via"] = "contains"
+        root["children"].append(parent_entry)
+        return root
 
     def _impact_digraph(self) -> nx.DiGraph:
         """Plain DiGraph whose edges all point in the direction impact flows."""
