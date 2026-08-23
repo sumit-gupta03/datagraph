@@ -42,17 +42,20 @@ warehouse / dbt / SQL / Python / Airflow / Lambda / OpenLineage / DataHub  ─�
 ## Install
 
 ```bash
-pip install datagraph              # core: graph, warehouse/dbt/code extractors, lineage, profiling, modelling, wiki
-pip install "datagraph[sql]"       # + sqlglot: SQL files, view definitions, column-level lineage   (recommended)
-pip install "datagraph[mcp]"       # + MCP server for Claude Code / Claude Desktop / Cursor
-pip install "datagraph[ai]"        # + Anthropic Claude for explanations / LLM lineage fallback
-pip install "datagraph[bedrock]"   # + Amazon Bedrock (Nova, Claude on Bedrock, Llama ...) for the same; OpenAI-compatible needs nothing extra
-pip install "datagraph[all]"       # everything (also PyYAML for YAML lineage files / serverless.yml)
+pip install datagraph-core              # core: graph, warehouse/dbt/code extractors, lineage, profiling, modelling, wiki
+pip install "datagraph-core[sql]"       # + sqlglot: SQL files, view definitions, column-level lineage   (recommended)
+pip install "datagraph-core[mcp]"       # + MCP server for Claude Code / Claude Desktop / Cursor
+pip install "datagraph-core[ai]"        # + Anthropic Claude for explanations / LLM lineage fallback
+pip install "datagraph-core[bedrock]"   # + Amazon Bedrock (Nova, Claude on Bedrock, Llama ...) for the same; OpenAI-compatible needs nothing extra
+pip install "datagraph-core[all]"       # everything (also PyYAML for YAML lineage files / serverless.yml)
 ```
+
+The PyPI distribution is **`datagraph-core`** (the bare name `datagraph` is not allowed on PyPI); the import name, CLI and MCP server are all `datagraph`:
+`pip install datagraph-core` → `import datagraph` / `datagraph analyze …`.
 
 Database drivers: SQLite and DuckDB files work out of the box; for Snowflake / Postgres / BigQuery / Redshift / MySQL / SQL Server
 install SQLAlchemy plus the driver and pass a SQLAlchemy URL (or pass an open DB-API connection from Python).
-Until the PyPI release is switched on, install from GitHub: `pip install "datagraph[sql] @ git+https://github.com/sumit-gupta03/datagraph"`.
+From source: `pip install "datagraph-core[sql] @ git+https://github.com/sumit-gupta03/datagraph"`.
 
 ## The standard flow: connection in → lineage, profiling, model out
 
@@ -175,7 +178,7 @@ datagraph wiki -o kb/                 # index.md, nodes/*.md (cross-linked), GRA
 `GRAPH_REPORT.md` lists hotspots, high-impact dbt models without tests, ownerless nodes, roots and leaves. Everything is generated
 from the graph, so an assistant explains rather than guesses.
 
-**MCP** (Claude Code, Claude Desktop, Cursor — any MCP client), after `pip install "datagraph[mcp]"` and one `analyze`/`build`:
+**MCP** (Claude Code, Claude Desktop, Cursor — any MCP client), after `pip install "datagraph-core[mcp]"` and one `analyze`/`build`:
 
 ```json
 {
@@ -270,7 +273,7 @@ analysis.risk, analysis.owners, analysis.recommended_tests, analysis.trees
 register(ExtractorPlugin(name="mytool", factory=MyToolExtractor, help="...", options={"token": "API token"}))
 # or in your package's pyproject:  [project.entry-points."datagraph.extractors"]  mytool = "my_pkg:MyToolExtractor"
 
-# 6. optional AI (pip install datagraph[ai])
+# 6. optional AI (pip install datagraph-core[ai])
 from datagraph.ai import explain_impact, suggest_lineage, apply_suggestions
 print(explain_impact(analysis))                                          # explains; never changes the graph
 apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)     # tagged provenance=llm, excludable
@@ -285,8 +288,8 @@ confidence-gated). Three interchangeable providers; pick with `--provider` or `D
 
 | Provider | Install | Credentials | Default model | Example |
 |---|---|---|---|---|
-| `anthropic` (default) | `datagraph[ai]` | `ANTHROPIC_API_KEY` | `claude-opus-5` | `datagraph explain dbt:customer` |
-| `bedrock` — Amazon Nova, Claude on Bedrock, Llama, Mistral … | `datagraph[bedrock]` | standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`, profile, SSO, instance role) | `amazon.nova-pro-v1:0` | `datagraph explain dbt:customer --provider bedrock --model amazon.nova-pro-v1:0` |
+| `anthropic` (default) | `datagraph-core[ai]` | `ANTHROPIC_API_KEY` | `claude-opus-5` | `datagraph explain dbt:customer` |
+| `bedrock` — Amazon Nova, Claude on Bedrock, Llama, Mistral … | `datagraph-core[bedrock]` | standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`, profile, SSO, instance role) | `amazon.nova-pro-v1:0` | `datagraph explain dbt:customer --provider bedrock --model amazon.nova-pro-v1:0` |
 | `openai` — any OpenAI-compatible endpoint (OpenAI, Azure, Ollama, vLLM, Groq …) | nothing extra | `DATAGRAPH_LLM_API_KEY` (+ `DATAGRAPH_LLM_BASE_URL`, e.g. `http://localhost:11434/v1` for Ollama) | `gpt-4o-mini` | `DATAGRAPH_LLM_PROVIDER=openai DATAGRAPH_LLM_BASE_URL=http://localhost:11434/v1 datagraph enrich --model llama3 --dry-run` |
 
 ```python
@@ -363,8 +366,8 @@ pytest            # 140 tests, offline, ~20 s — includes dbt's real jaffle_sho
 ```
 
 Docs: `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from
-zero). Tagging `vX.Y.Z` builds wheels and creates a GitHub Release; PyPI publishing switches on once the trusted publisher is configured
-(see `.github/workflows/publish.yml`).
+zero). Tagging `vX.Y.Z` builds wheels, creates a GitHub Release and publishes `datagraph-core` to PyPI via trusted publishing
+(`.github/workflows/publish.yml`).
 
 ## Roadmap
 
@@ -372,7 +375,6 @@ zero). Tagging `vX.Y.Z` builds wheels and creates a GitHub Release; PyPI publish
 - Tree-sitter parsers for Java / Scala / Go (today: Python via ast, JS/TS via regex)
 - Data-quality rule suggestions from profiles + model (uniqueness of keys, referential integrity, freshness SLAs)
 - Incremental per-file rebuilds (today `--update` skips unchanged inputs)
-- PyPI release (workflow ready; needs the trusted publisher enabled)
 
 ## License
 
