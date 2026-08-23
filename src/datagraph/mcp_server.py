@@ -76,8 +76,16 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
 
         return _rel(_graph(), search=search, include_columns=include_columns)
 
+    def context(node: str, depth: int = 2) -> str:
+        """Compact knowledge pack for one node: columns (+profile), owners, upstream, downstream,
+        relationships, tests, risk if changed, and the SQL that builds it. Use before answering
+        questions about, or editing, a table / model / function."""
+        from .knowledge import context as _ctx
+
+        return _ctx(_graph(), node, depth=depth)
+
     return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
-            "lineage": lineage, "relationships": relationships}
+            "lineage": lineage, "relationships": relationships, "context": context}
 
 
 def serve(graph_path: str) -> None:

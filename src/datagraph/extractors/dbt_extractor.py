@@ -70,6 +70,13 @@ class DbtExtractor(Extractor):
             for v in variants:
                 relation_to_node.setdefault(v.lower(), (node_id, display))
 
+        # dbt tests -> which models they cover (shown in context/wiki, used by the graph report)
+        tests_by_model: Dict[str, list] = {}
+        for unique_id, node in manifest.get("nodes", {}).items():
+            if node.get("resource_type") == "test":
+                for dep in (node.get("depends_on") or {}).get("nodes", []):
+                    tests_by_model.setdefault(dep, []).append(node.get("name", unique_id))
+
         # Models / seeds / snapshots
         for unique_id, node in manifest.get("nodes", {}).items():
             resource_type = node.get("resource_type")
@@ -80,6 +87,7 @@ class DbtExtractor(Extractor):
             unique_to_graph_id[unique_id] = gid
             config = node.get("config") or {}
             owner = _owner_of(node)
+            sql = node.get("compiled_code") or node.get("compiled_sql") or node.get("raw_code") or node.get("raw_sql")
             graph.add_node(
                 Node(
                     id=gid,
@@ -94,6 +102,8 @@ class DbtExtractor(Extractor):
                         "description": node.get("description") or "",
                         "owner": owner,
                         "tags": node.get("tags") or [],
+                        "sql": (sql or "")[:4000] or None,
+                        "tests": tests_by_model.get(unique_id, []),
                     },
                 )
             )

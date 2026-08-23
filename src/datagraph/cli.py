@@ -144,6 +144,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_rel.add_argument("--tables-only", action="store_true", help="Skip column-level relationships")
     p_rel.add_argument("--json", action="store_true")
 
+    p_prof = sub.add_parser("profile", help="Light data profiling through a database connection (row counts, nulls, distincts, ranges, top values)")
+    p_prof.add_argument("--warehouse", metavar="DSN", required=True, help=".db/.sqlite file, sqlite:///…, duckdb://…, or a SQLAlchemy URL")
+    p_prof.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_prof.add_argument("--tables", default=None, help="Comma-separated table ids/names (default: all warehouse tables in the graph)")
+    p_prof.add_argument("--sample", type=int, default=100000, help="Rows sampled per table for column stats")
+    p_prof.add_argument("--no-top-values", action="store_true")
+    p_prof.add_argument("--json", action="store_true")
+
+    p_wiki = sub.add_parser("wiki", help="Export a Markdown knowledge base (index, GRAPH_REPORT, llms.txt, one page per node) for AI assistants and humans")
+    p_wiki.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_wiki.add_argument("-o", "--output", default="datagraph-wiki")
+    p_wiki.add_argument("--title", default="datagraph knowledge base")
+    p_wiki.add_argument("--with-files", action="store_true", help="Also create pages for source files")
+
+    p_ctx = sub.add_parser("context", help="Compact knowledge pack for one node (columns, profile, lineage, relationships, risk, SQL) — paste into an assistant")
+    p_ctx.add_argument("node")
+    p_ctx.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_ctx.add_argument("--depth", type=int, default=2)
+
+    p_plug = sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
+
     p_lin = sub.add_parser("lineage", help="Upstream (where it comes from) and downstream (what it feeds) of a node")
     p_lin.add_argument("node")
     p_lin.add_argument("--graph", default=DEFAULT_GRAPH)
@@ -171,6 +192,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_mcp = sub.add_parser("mcp", help="Serve the graph over MCP (stdio)")
     p_mcp.add_argument("--graph", default=DEFAULT_GRAPH)
 
+    # extractor plugins contribute --<name> flags to build / watch / hook-install
+    from .extractors.registry import plugins as _plugins
+
+    for plugin in _plugins():
+        for p in (p_build, p_watch, p_hook_install):
+            try:
+                p.add_argument(f"--{plugin.name}", dest=f"plugin_{plugin.name}", metavar=plugin.value_name, help=plugin.help or f"{plugin.name} extractor plugin")
+                for opt, help_text in plugin.options.items():
+                    p.add_argument(f"--{plugin.name}-{opt}", dest=f"plugin_{plugin.name}_{opt}", default=None, help=help_text)
+            except argparse.ArgumentError:
+                pass
+
     args = parser.parse_args(argv)
     try:
         return _dispatch(args)
@@ -195,6 +228,10 @@ def _dispatch(args: argparse.Namespace) -> int:
         "html": _cmd_html,
         "lineage": _cmd_lineage,
         "relationships": _cmd_relationships,
+        "profile": _cmd_profile,
+        "wiki": _cmd_wiki,
+        "context": _cmd_context,
+        "plugins": _cmd_plugins,
         "watch": _cmd_watch,
         "hook-install": _cmd_hook_install,
         "explain": _cmd_explain,
@@ -287,6 +324,16 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
         fragment = DataHubExtractor(args.datahub, token=token, query=args.datahub_query).extract()
         log(f"datahub: {len(fragment)} nodes from {args.datahub}")
         graph.merge(fragment)
+    from .extractors.registry import plugins as _plugins
+
+    for plugin in _plugins():
+        value = getattr(args, f"plugin_{plugin.name}", None)
+        if not value:
+            continue
+        options = {opt: getattr(args, f"plugin_{plugin.name}_{opt}", None) for opt in plugin.options}
+        fragment = plugin.extract(value, **options)
+        log(f"{plugin.name}: {len(fragment)} nodes from {value}")
+        graph.merge(fragment)
     if not getattr(args, "no_alias_linking", False):
         linked = graph.link_table_aliases()
         if linked:
@@ -295,7 +342,8 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
 
 
 def _require_inputs(args: argparse.Namespace) -> bool:
-    if not any(_build_inputs(args)) and not getattr(args, "warehouse", None) and not getattr(args, "datahub", None):
+    plugin_values = [v for k, v in vars(args).items() if k.startswith("plugin_") and v and "_" not in k[len("plugin_"):]]
+    if not any(_build_inputs(args)) and not getattr(args, "warehouse", None) and not getattr(args, "datahub", None) and not plugin_values:
         print(
             "error: provide at least one of --repo, --dbt-manifest, --sql, --openlineage, --lineage-file, "
             "--warehouse, --airflow, --lambda, --js, --datahub",
@@ -530,6 +578,50 @@ def _cmd_relationships(args: argparse.Namespace) -> int:
             print(f"    {r['from']}  ->  {r['to']}  [{r['via']}]")
     print(f"\n{len(rel['tables'])} tables/views, {len(rel['table_relationships'])} table relationships, "
           f"{len(rel['column_relationships'])} column relationships  (* = primary key)")
+    return 0
+
+
+def _cmd_profile(args: argparse.Namespace) -> int:
+    from .profiling import profile_warehouse
+
+    graph = _load_graph(args.graph)
+    tables = [t.strip() for t in args.tables.split(",")] if args.tables else None
+    results = profile_warehouse(args.warehouse, graph, tables=tables, sample=args.sample,
+                                top_values=not args.no_top_values, log=None if args.json else print)
+    graph.save(args.graph)
+    if args.json:
+        print(json.dumps(results, indent=2, sort_keys=True, default=str))
+    else:
+        print(f"profiled {len(results)} table(s); results stored in {args.graph}")
+    return 0
+
+
+def _cmd_wiki(args: argparse.Namespace) -> int:
+    from .knowledge import build_wiki
+
+    graph = _load_graph(args.graph)
+    stats = build_wiki(graph, args.output, title=args.title, include_files=args.with_files)
+    print(f"wiki: {stats['pages']} pages for {stats['nodes']} nodes -> {args.output}/ (index.md, GRAPH_REPORT.md, llms.txt)")
+    return 0
+
+
+def _cmd_context(args: argparse.Namespace) -> int:
+    from .knowledge import context
+
+    graph = _load_graph(args.graph)
+    print(context(graph, args.node, depth=args.depth))
+    return 0
+
+
+def _cmd_plugins(args: argparse.Namespace) -> int:
+    from .extractors.registry import plugins
+
+    found = plugins()
+    if not found:
+        print("no extractor plugins installed (declare a 'datagraph.extractors' entry point to add one)")
+        return 0
+    for p in found:
+        print(f"--{p.name} {p.value_name}\t{p.help}\t[{p.source}]")
     return 0
 
 

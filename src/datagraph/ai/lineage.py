@@ -62,12 +62,20 @@ def schema_summary(graph: ImpactGraph, max_tables: Optional[int] = None) -> Dict
     for n in sorted(graph.nodes(), key=lambda x: x.id):
         if n.type not in _TABLE_TYPES:
             continue
-        cols = sorted(
-            [{"id": c.id, "name": c.name, "type": c.meta.get("data_type")}
-             for c in graph.nodes(NodeType.COLUMN) if c.meta.get("parent") == n.id],
-            key=lambda c: c["id"],
-        )
-        tables.append({"id": n.id, "type": n.type.value, "columns": cols})
+        cols = []
+        for c in graph.nodes(NodeType.COLUMN):
+            if c.meta.get("parent") != n.id:
+                continue
+            entry = {"id": c.id, "name": c.name, "type": c.meta.get("data_type")}
+            prof = c.meta.get("profile") or {}
+            if prof:  # distinct counts / ranges help the model spot join keys
+                entry["profile"] = {k: prof.get(k) for k in ("distinct", "null_pct", "min", "max") if prof.get(k) is not None}
+            cols.append(entry)
+        cols.sort(key=lambda c: c["id"])
+        t_entry = {"id": n.id, "type": n.type.value, "columns": cols}
+        if (n.meta.get("profile") or {}).get("row_count") is not None:
+            t_entry["row_count"] = n.meta["profile"]["row_count"]
+        tables.append(t_entry)
     if max_tables is not None:
         tables = tables[:max_tables]
     for e in graph.edges():

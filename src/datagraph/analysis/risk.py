@@ -43,6 +43,14 @@ def risk_score(graph: ImpactGraph, affected: Dict[str, int]) -> Dict:
         if node is None:
             continue
         weight = NODE_WEIGHTS.get(node.type, 1)
+        # data-aware adjustment when the node has been profiled
+        prof = (node.meta or {}).get("profile") or {}
+        rows = prof.get("row_count")
+        if isinstance(rows, int):
+            if rows == 0:
+                weight *= 0.5           # empty table: low stakes
+            elif rows >= 1_000_000:
+                weight *= 1.5           # big table: higher stakes
         # depth discount: direct hits count full, deeper hits at least half
         discount = max(0.5, 1.0 - 0.1 * (depth - 1))
         score += weight * discount

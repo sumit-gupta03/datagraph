@@ -18,6 +18,7 @@ from typing import Dict, Iterable, List, Optional
 
 from .analysis import ImpactAnalysis
 from .graph import IMPACT_DIRECTION, INFERRED, ImpactGraph, NodeType
+from .profiling import profile_summary
 
 _COLORS = {
     "file": "#8E8E93",
@@ -127,6 +128,7 @@ def _render(graph, depth: Dict[str, int], focus: set, title: str, subtitle: str,
         nodes_js.append({
             "id": nid, "name": node.name if node else nid, "type": node.type.value if node else "unknown",
             "depth": depth[nid], "owner": (node.owner if node else None) or "",
+            "profile": profile_summary(node) if node else "",
             "x": round(x, 1), "y": round(y, 1), "changed": nid in focus,
         })
     ids = set(node_ids)
@@ -216,7 +218,7 @@ D.nodes.forEach(n=>{
   const t = el('text',{'text-anchor':'middle',y:4}); t.textContent = n.name.length>20? n.name.slice(0,19)+'…':n.name;
   t.setAttribute('fill', '#111'); g.appendChild(t);
   g.addEventListener('click',()=>select(n.id));
-  g.addEventListener('mousemove',ev=>{tip.style.display='block';tip.style.left=(ev.clientX+12)+'px';tip.style.top=(ev.clientY+12)+'px';tip.textContent=`${n.id} · ${n.type} · depth ${n.depth}${n.owner?' · owner '+n.owner:''}`});
+  g.addEventListener('mousemove',ev=>{tip.style.display='block';tip.style.left=(ev.clientX+12)+'px';tip.style.top=(ev.clientY+12)+'px';tip.textContent=`${n.id} · ${n.type} · depth ${n.depth}${n.owner?' · owner '+n.owner:''}${n.profile?' · '+n.profile:''}`});
   g.addEventListener('mouseleave',()=>tip.style.display='none');
   svg.appendChild(g); nodeEls[n.id]=g;
 });
@@ -226,7 +228,7 @@ function select(id){
   while(st.length){const c=st.pop(); (out[c]||[]).forEach(t=>{if(!reach.has(t)){reach.add(t);st.push(t)}})}
   D.nodes.forEach(n=>nodeEls[n.id].classList.toggle('dim',!reach.has(n.id)));
   edgeEls.forEach(p=>{const on=reach.has(p.dataset.s)&&reach.has(p.dataset.t);p.classList.toggle('dim',!on);p.classList.toggle('hl',on)});
-  const n=pos[id]; document.getElementById('sel').innerHTML=`<b>${n.name}</b><br>${n.id}<br>type: ${n.type}<br>depth: ${n.depth}<br>${n.owner?'owner: '+n.owner+'<br>':''}downstream in view: ${reach.size-1}`;
+  const n=pos[id]; document.getElementById('sel').innerHTML=`<b>${n.name}</b><br>${n.id}<br>type: ${n.type}<br>depth: ${n.depth}<br>${n.owner?'owner: '+n.owner+'<br>':''}${n.profile?'profile: '+n.profile+'<br>':''}downstream in view: ${reach.size-1}`;
 }
 document.getElementById('q').addEventListener('input',ev=>{const q=ev.target.value.toLowerCase();D.nodes.forEach(n=>nodeEls[n.id].classList.toggle('dim',q&&!(n.id.toLowerCase().includes(q)||n.name.toLowerCase().includes(q))))});
 document.getElementById('inf').addEventListener('change',ev=>{edgeEls.forEach(p=>{if(p.dataset.inferred==='true')p.style.display=ev.target.checked?'':'none'})});

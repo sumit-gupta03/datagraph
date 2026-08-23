@@ -7,7 +7,7 @@ Answer the two questions every data / platform engineer asks:
 > *"If I change this file, function, dbt model, SQL column, or table — what can break?"*
 > *"Where does this table / column come from, and what does it feed?"*
 
-Projects like Graphify / Code-Graph-RAG build graphs from source code; DataHub and OpenLineage focus on data lineage. `datagraph` connects both worlds into **one unified graph** and answers from it in seconds, locally:
+Projects like Graphify / Code-Graph-RAG build graphs from source code; DataHub and OpenLineage focus on data lineage. `datagraph` connects both worlds into **one unified graph**, answers from it in seconds, locally — and since v0.5 turns that graph into a **knowledge base for AI assistants** (`datagraph wiki`, `datagraph context`, MCP `context`) with light **data profiling** and an **extractor plugin** mechanism so any data tool can be added:
 
 ```
 Git Change → Python/JS Function → Lambda → API → Table → dbt Model → Report / Dashboard
@@ -111,6 +111,18 @@ Recommended tests:
 
 `--json` for machines · `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls, same-name column guesses and `llm` suggestions) · `--html out.html` for the picture.
 
+### Knowledge base for AI assistants (v0.5)
+
+```bash
+datagraph profile --warehouse prod.db          # row counts, freshness, null %, distinct, min/max, top values -> stored on the graph
+datagraph context dim_customer                 # one compact text pack: columns (+profile), owners, upstream, downstream,
+                                               # relationships, tests, risk-if-changed, and the SQL that builds it
+datagraph wiki -o kb/                          # Markdown knowledge base: index.md, GRAPH_REPORT.md, llms.txt, one page per node
+datagraph plugins                              # extractor plugins installed via the `datagraph.extractors` entry point
+```
+
+`context` and `wiki` are what an assistant (Claude Code, Cursor, a RAG bot) needs to answer *"what is this table, where does it come from, is it safe to change, what should I test?"* — generated deterministically, so the assistant explains rather than guesses. `GRAPH_REPORT.md` lists hotspots, high-impact dbt models without tests, ownerless nodes, roots and leaves. Profiles feed the risk score (empty tables count half, >1M-row tables count 1.5×) and the optional LLM lineage fallback (distinct counts help it spot join keys).
+
 ## Python API
 
 ```python
@@ -132,6 +144,18 @@ print(graph.lineage("table:prod.analytics.dim_customer"))       # {'upstream': {
 from datagraph.analysis.relationships import relationships
 print(relationships(graph)["table_relationships"])              # foreign keys + lineage between tables
 
+# Knowledge base for assistants
+from datagraph.knowledge import context, build_wiki
+from datagraph.profiling import profile_warehouse
+profile_warehouse("warehouse.db", graph)                         # stores node.meta["profile"]
+print(context(graph, "dim_customer"))                            # compact text pack
+build_wiki(graph, "kb/")                                         # index.md, GRAPH_REPORT.md, llms.txt, nodes/*.md
+
+# Plug in your own extractor (BI tool, orchestrator, catalog...) — it also becomes `datagraph build --mytool X`
+from datagraph.extractors.registry import ExtractorPlugin, register
+register(ExtractorPlugin(name="mytool", factory=MyToolExtractor, help="...", options={"token": "API token"}))
+# or, in your package's pyproject: [project.entry-points."datagraph.extractors"]  mytool = "my_pkg:MyToolExtractor"
+
 # Optional AI (pip install datagraph[ai])
 from datagraph.ai import explain_impact, suggest_lineage, apply_suggestions
 print(explain_impact(analysis))
@@ -141,7 +165,8 @@ apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged 
 ## Use it from AI coding assistants
 
 - **Claude Code skill:** copy `skills/datagraph/` to `.claude/skills/datagraph/` (or `~/.claude/skills/`). Ask *"what breaks if I change dim_customer?"*, *"where does fact_booking come from?"*, *"how are these tables related?"*.
-- **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`.
+- **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`, `context`.
+- **Any assistant / RAG:** `datagraph wiki -o kb/` and point it at `kb/llms.txt` or `kb/index.md`.
 
 ## GitHub Action — impact comment on every PR
 
@@ -194,12 +219,13 @@ dag:nightly_bookings           task:nightly_bookings/build_dim        lambda:Get
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e .[dev]
-pytest            # 108 tests, offline, ~7 s — includes dbt's real jaffle_shop project as a fixture
+pytest            # 119 tests, offline, ~13 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
 ## Roadmap
 
 - Tree-sitter based parsers for Java/Scala/Go (today: Python via ast, JS/TS via regex)
+- Plugin packages for Looker / Tableau / Dagster / Prefect / Kafka (the `datagraph.extractors` entry point is ready)
 - Airflow TaskFlow-decorated task bodies, Dagster/Prefect extractors
 - Incremental per-file rebuilds (today `--update` skips unchanged inputs)
 - PyPI release (workflow ready; needs the trusted publisher enabled)
