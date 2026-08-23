@@ -84,8 +84,20 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
 
         return _ctx(_graph(), node, depth=depth)
 
+    def model(from_table: str = "", include_inferred: bool = True) -> dict:
+        """Dimensional model of the warehouse: facts (grain, measures, dimensions), dimensions (keys,
+        attributes, conformed), issues to fix, Mermaid ER diagram. Pass from_table to get a proposed
+        star schema for one wide/flat table."""
+        from .analysis.modeling import propose_from_table, star_schema, to_mermaid
+
+        g = _graph()
+        m = propose_from_table(g, from_table) if from_table else star_schema(g, include_inferred=include_inferred)
+        m["mermaid"] = to_mermaid(m)
+        m.pop("classification", None)
+        return m
+
     return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
-            "lineage": lineage, "relationships": relationships, "context": context}
+            "lineage": lineage, "relationships": relationships, "context": context, "model": model}
 
 
 def serve(graph_path: str) -> None:

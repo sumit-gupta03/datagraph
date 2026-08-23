@@ -27,6 +27,7 @@ relationships as a fallback and those are tagged `llm`. You explain the output â
    - **Which nodes are most dangerous to change?** `datagraph hotspots --json`
    - **Tell me about X / before editing X:** `datagraph context X` (columns + profile, owners, lineage, relationships, tests, risk, SQL)
    - **Document everything for the team / a RAG bot:** `datagraph wiki -o kb/` (index.md, GRAPH_REPORT.md, llms.txt)
+   - **Facts / dimensions / star schema / ER diagram:** `datagraph model --json` (or `--from-table X` to propose a star from a wide table)
    - **Data stats (row counts, nulls, distincts):** `datagraph profile --warehouse DSN` first, then the above show them
    - **Show a picture:** `datagraph html dbt:customer -o impact.html`, `datagraph lineage X --html lineage.html`,
      `datagraph html --all -o graph.html`

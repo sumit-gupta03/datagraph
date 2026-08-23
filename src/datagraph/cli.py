@@ -163,6 +163,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ctx.add_argument("--graph", default=DEFAULT_GRAPH)
     p_ctx.add_argument("--depth", type=int, default=2)
 
+    p_model = sub.add_parser("model", help="Dimensional modelling: classify facts/dimensions, star schema, ER diagram, issues; or propose a star from one wide table")
+    p_model.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_model.add_argument("--from-table", default=None, help="Propose a fact + dimensions from this wide/flat table")
+    p_model.add_argument("--no-inferred", action="store_true", help="Use declared foreign keys only (no name-based links)")
+    p_model.add_argument("--json", action="store_true")
+    p_model.add_argument("--mermaid", default=None, help="Write the ER diagram (Mermaid) here")
+    p_model.add_argument("--markdown", default=None, help="Write the Markdown report here")
+
     p_plug = sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
 
     p_lin = sub.add_parser("lineage", help="Upstream (where it comes from) and downstream (what it feeds) of a node")
@@ -232,6 +240,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "wiki": _cmd_wiki,
         "context": _cmd_context,
         "plugins": _cmd_plugins,
+        "model": _cmd_model,
         "watch": _cmd_watch,
         "hook-install": _cmd_hook_install,
         "explain": _cmd_explain,
@@ -610,6 +619,33 @@ def _cmd_context(args: argparse.Namespace) -> int:
 
     graph = _load_graph(args.graph)
     print(context(graph, args.node, depth=args.depth))
+    return 0
+
+
+def _cmd_model(args: argparse.Namespace) -> int:
+    from .analysis.modeling import propose_from_table, star_schema, to_markdown, to_mermaid
+
+    graph = _load_graph(args.graph)
+    if args.from_table:
+        try:
+            model = propose_from_table(graph, args.from_table)
+        except KeyError:
+            print(f"error: no table matches '{args.from_table}'", file=sys.stderr)
+            return 2
+        title = f"Proposed star schema from {args.from_table}"
+    else:
+        model = star_schema(graph, include_inferred=not args.no_inferred)
+        title = "Dimensional model"
+    if args.mermaid:
+        Path(args.mermaid).write_text(to_mermaid(model), encoding="utf-8")
+        print(f"mermaid -> {args.mermaid}", file=sys.stderr)
+    if args.markdown:
+        Path(args.markdown).write_text(to_markdown(model, title), encoding="utf-8")
+        print(f"markdown -> {args.markdown}", file=sys.stderr)
+    if args.json:
+        print(json.dumps(model, indent=2, sort_keys=True, default=str))
+    elif not (args.mermaid or args.markdown):
+        print(to_markdown(model, title))
     return 0
 
 

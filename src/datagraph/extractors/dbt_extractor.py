@@ -55,6 +55,7 @@ class DbtExtractor(Extractor):
         graph = ImpactGraph()
         manifest = json.loads(self.manifest_path.read_text(encoding="utf-8-sig"))
         dialect = self.dialect or (manifest.get("metadata") or {}).get("adapter_type")
+        catalog_cols = self._catalog_columns()  # unique_id -> {column: type} (real columns, for modelling/profiles)
 
         unique_to_graph_id: Dict[str, str] = {}
         relation_to_node: Dict[str, Tuple[str, str]] = {}  # lower relation name -> (graph id, display)
@@ -128,9 +129,13 @@ class DbtExtractor(Extractor):
                 )
                 graph.add_edge(Edge(src=gid, dst=relation, type=EdgeType.WRITES_TO))
 
-            for col_name in (node.get("columns") or {}).keys():
+            cat_cols = catalog_cols.get(unique_id, {})
+            declared = {k.lower() for k in (node.get("columns") or {})}
+            col_names = list((node.get("columns") or {}).keys()) + [c for c in cat_cols if c.lower() not in declared]
+            for col_name in col_names:
                 col_id = f"column:{name}.{col_name.lower()}"
-                graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=col_name.lower(), meta={"parent": gid}))
+                dtype = ((node.get("columns") or {}).get(col_name) or {}).get("data_type") or cat_cols.get(col_name) or cat_cols.get(col_name.lower())
+                graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=col_name.lower(), meta={"parent": gid, "data_type": dtype}))
                 graph.add_edge(Edge(src=gid, dst=col_id, type=EdgeType.CONTAINS))
 
         # Sources
@@ -150,9 +155,13 @@ class DbtExtractor(Extractor):
             register_relation(
                 gid, f"{source_name}.{name}", source.get("database"), source.get("schema"), source.get("identifier") or name
             )
-            for col_name in (source.get("columns") or {}).keys():
+            cat_cols = catalog_cols.get(unique_id, {})
+            declared = {k.lower() for k in (source.get("columns") or {})}
+            col_names = list((source.get("columns") or {}).keys()) + [c for c in cat_cols if c.lower() not in declared]
+            for col_name in col_names:
                 col_id = f"column:{source_name}.{name}.{col_name.lower()}"
-                graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=col_name.lower(), meta={"parent": gid}))
+                dtype = ((source.get("columns") or {}).get(col_name) or {}).get("data_type") or cat_cols.get(col_name) or cat_cols.get(col_name.lower())
+                graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=col_name.lower(), meta={"parent": gid, "data_type": dtype}))
                 graph.add_edge(Edge(src=gid, dst=col_id, type=EdgeType.CONTAINS))
 
         # Exposures
@@ -225,6 +234,21 @@ class DbtExtractor(Extractor):
         if "" in schema and not schema[""]:
             del schema[""]
         return schema
+
+    def _catalog_columns(self) -> Dict[str, Dict[str, str]]:
+        """{unique_id: {column_name: data_type}} from catalog.json (empty if no catalog)."""
+        out: Dict[str, Dict[str, str]] = {}
+        if not self.catalog_path:
+            return out
+        try:
+            catalog = json.loads(self.catalog_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return out
+        for section in ("nodes", "sources"):
+            for uid, entry in (catalog.get(section) or {}).items():
+                cols = entry.get("columns") or {}
+                out[uid] = {c: (v or {}).get("type") for c, v in cols.items()}
+        return out
 
     def _add_column_lineage(self, graph, manifest, unique_to_graph_id, relation_to_node, dialect) -> None:
         try:

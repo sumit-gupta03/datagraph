@@ -10,6 +10,7 @@ from .graph import EXTRACTED, INFERRED, LLM, DataGraph, Edge, EdgeType, ImpactGr
 from .analysis import ImpactAnalysis, analyze_impact
 from .knowledge import build_wiki, context
 from .profiling import profile_warehouse
+from .analysis.modeling import classify_tables, propose_from_table, star_schema
 from .extractors.registry import ExtractorPlugin, register
 from .extractors import (
     DbtExtractor,
@@ -26,10 +27,10 @@ from .extractors import (
     collect_changes,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
-    "build_wiki", "context", "profile_warehouse", "ExtractorPlugin", "register",
+    "build_wiki", "context", "profile_warehouse", "classify_tables", "star_schema", "propose_from_table", "ExtractorPlugin", "register",
     "Edge",
     "EdgeType",
     "ImpactGraph",

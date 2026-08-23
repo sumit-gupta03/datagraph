@@ -1,6 +1,6 @@
 # datagraph
 
-**AI-powered Change Impact Graph for data and code systems.**
+**The data engine: lineage · relationships · profiling · dimensional modelling · knowledge graph for AI assistants — built deterministically from code, dbt, SQL and warehouse metadata.** (For the pull-request "what breaks if I merge this?" check, see [impactgraph](https://github.com/sumit-gupta03/impactgraph), built on this engine.)
 
 Answer the two questions every data / platform engineer asks:
 
@@ -111,6 +111,36 @@ Recommended tests:
 
 `--json` for machines · `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls, same-name column guesses and `llm` suggestions) · `--html out.html` for the picture.
 
+### Dimensional modelling (v0.6)
+
+```bash
+datagraph model                                # facts / dimensions / bridges with confidence + reasons, star schema,
+                                               # conformed dimensions, snowflake chains, issues, Mermaid ER diagram
+datagraph model --mermaid er.mmd --markdown model.md
+datagraph model --from-table wide_orders       # propose fact + dimensions from one flat/wide table (uses profiles)
+datagraph model --no-inferred                  # declared foreign keys only
+```
+
+Classification is deterministic and explained: column roles (pk / fk / date / measure / flag / attribute) from names, types and
+profiles; foreign keys from the warehouse (`extracted`) or inferred from names like `orders.customer_id -> customers` (`inferred`).
+The report lists what to fix: facts without a time grain, keys with no dimension, snowflaked dimensions, measures sitting in
+dimensions, high-null keys (late-arriving dimensions). `MODEL.md` is part of the wiki and `model` is an MCP tool.
+
+### Dimensional modelling (v0.6)
+
+```bash
+datagraph model                                # facts / dimensions / bridges with confidence + reasons, star schema,
+                                               # conformed dimensions, snowflake chains, issues, Mermaid ER diagram
+datagraph model --mermaid er.mmd --markdown model.md
+datagraph model --from-table wide_orders       # propose fact + dimensions from one flat/wide table (uses profiles)
+datagraph model --no-inferred                  # declared foreign keys only
+```
+
+Classification is deterministic and explained: column roles (pk / fk / date / measure / flag / attribute) from names, types and
+profiles; foreign keys from the warehouse (`extracted`) or inferred from names like `orders.customer_id -> customers` (`inferred`).
+The report lists what to fix: facts without a time grain, keys with no dimension, snowflaked dimensions, measures sitting in
+dimensions, high-null keys (late-arriving dimensions). `MODEL.md` is part of the wiki and `model` is an MCP tool.
+
 ### Knowledge base for AI assistants (v0.5)
 
 ```bash
@@ -168,17 +198,13 @@ apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged 
 - **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`, `context`.
 - **Any assistant / RAG:** `datagraph wiki -o kb/` and point it at `kb/llms.txt` or `kb/index.md`.
 
-## GitHub Action — impact comment on every PR
+## Pull-request check — use impactgraph
 
-```yaml
-- uses: sumit-gupta03/datagraph@main
-  with:
-    repo-path: src
-    dbt-manifest: target/manifest.json
-    fail-on: CRITICAL        # LOW | MEDIUM | HIGH | CRITICAL | NONE
-```
-
-See `examples/github-workflow-impact.yml` and `action.yml`. Tagging `vX.Y.Z` builds and creates a GitHub Release (`.github/workflows/publish.yml`); PyPI publishing switches on once the trusted publisher is configured (see the workflow header).
+The PR-facing product (`impactgraph check` / `pr`, the GitHub Action that comments the blast radius on every PR, `--fail-on` gating)
+lives in the companion package **[impactgraph](https://github.com/sumit-gupta03/impactgraph)**, which is a thin layer over this engine
+and re-exports its whole API. datagraph itself is everything data-related: extractors, lineage, relationships, profiling,
+dimensional modelling, the knowledge base for AI assistants, MCP and plugins. Tagging `vX.Y.Z` here builds and creates a GitHub
+Release (`.github/workflows/publish.yml`); PyPI publishing switches on once the trusted publisher is configured (see the workflow header).
 
 ## How it compares: Graphify · DataHub · OpenLineage · datagraph
 
@@ -219,7 +245,7 @@ dag:nightly_bookings           task:nightly_bookings/build_dim        lambda:Get
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e .[dev]
-pytest            # 119 tests, offline, ~13 s — includes dbt's real jaffle_shop project as a fixture
+pytest            # 124 tests, offline, ~15 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
 ## Roadmap
