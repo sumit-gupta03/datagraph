@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "datagraph": {
+      "command": "python",
+      "args": ["-m", "datagraph.cli", "mcp", "--graph", "C:/path/to/datagraph-out/datagraph.json"]
+    }
+  }
+}

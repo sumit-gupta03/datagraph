@@ -209,8 +209,26 @@ apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged 
 ## Use it from AI coding assistants
 
 - **Claude Code skill:** copy `skills/datagraph/` to `.claude/skills/datagraph/` (or `~/.claude/skills/`). Ask *"what breaks if I change dim_customer?"*, *"where does fact_booking come from?"*, *"how are these tables related?"*.
-- **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`, `context`.
+- **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`, `context`, `model`.
 - **Any assistant / RAG:** `datagraph wiki -o kb/` and point it at `kb/llms.txt` or `kb/index.md`.
+
+MCP setup (Claude Desktop / Claude Code / Cursor — any MCP client), after `pip install "datagraph[mcp]"` and one `datagraph analyze` or `datagraph build`:
+
+```json
+{
+  "mcpServers": {
+    "datagraph": {
+      "command": "python",
+      "args": ["-m", "datagraph.cli", "mcp", "--graph", "/path/to/datagraph-out/datagraph.json"]
+    }
+  }
+}
+```
+
+(`examples/mcp/claude-mcp.json`; for Claude Code put it in `.mcp.json` at the repo root or run
+`claude mcp add datagraph -- python -m datagraph.cli mcp --graph /path/to/datagraph.json`.) The server is stdio-only and read-only:
+it never receives connection strings — the graph file you built is the only input. Tools: `impact`, `diff`, `find_nodes`, `paths`,
+`hotspots`, `lineage`, `relationships`, `context`, `model`.
 
 ## Pull-request check — use impactgraph
 
