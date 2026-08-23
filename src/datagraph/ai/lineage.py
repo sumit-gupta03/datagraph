@@ -8,7 +8,8 @@ asks Claude for candidate relationships using **structured outputs**, and
 confidence and a reason. Those edges are shown with an ``(llm)`` marker,
 excluded by ``--no-inferred``, and can be reviewed in ``relationships --json``.
 
-Install with ``pip install datagraph[ai]`` and set ``ANTHROPIC_API_KEY``.
+Providers: Anthropic (default), Amazon Bedrock (Nova / Claude on Bedrock / ...), or any
+OpenAI-compatible endpoint - see ``datagraph.ai.providers``.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import json
 from typing import Dict, List, Optional
 
 from ..security import UNTRUSTED_NOTICE, sanitize_text, wrap_untrusted
+from .providers import extract_json, get_provider
 from ..graph import LLM, Edge, EdgeType, ImpactGraph, Node, NodeType
 
 SYSTEM_PROMPT = (
@@ -91,38 +93,26 @@ def schema_summary(graph: ImpactGraph, max_tables: Optional[int] = None) -> Dict
 def suggest_lineage(
     graph: ImpactGraph,
     unparsed_sql: Optional[List[Dict]] = None,
-    model: str = "claude-opus-5",
+    model: Optional[str] = None,
     api_key: Optional[str] = None,
     max_tables: Optional[int] = None,
     max_tokens: int = 16000,
+    provider=None,
 ) -> List[Dict]:
-    """Ask Claude for candidate relationships. Returns a list of suggestion dicts
-    (kind, source, target, confidence, reason) — nothing is added to the graph yet."""
-    try:
-        import anthropic
-    except ImportError as e:
-        raise ImportError("LLM lineage suggestions require the 'anthropic' package: pip install datagraph[ai]") from e
-
-    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+    """Ask the configured LLM for candidate relationships. Returns a list of suggestion dicts
+    (kind, source, target, confidence, reason) - nothing is added to the graph yet.
+    ``provider``: LLMProvider instance or name ('anthropic' | 'bedrock' | 'openai'); default Anthropic."""
+    llm = get_provider(provider, model=model, api_key=api_key)
     payload = schema_summary(graph, max_tables=max_tables)
     payload["unparsed_sql"] = [
         {"where": sanitize_text(u.get("where"), 300), "sql": sanitize_text(u.get("sql", ""), 4000)} for u in (unparsed_sql or [])
     ][:50]
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=SYSTEM_PROMPT,
-        output_config={"format": {"type": "json_schema", "schema": SUGGESTION_SCHEMA}},
-        messages=[{"role": "user", "content": "Schema, known relationships and unparsed SQL as JSON:\n\n"
-                                               + wrap_untrusted(f"```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```")
-                                               + "\n\nSuggest additional relationships."}],
-    )
-    if response.stop_reason == "refusal":
-        return []
-    text = "".join(block.text for block in response.content if block.type == "text")
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    user = ("Schema, known relationships and unparsed SQL as JSON:\n\n"
+            + wrap_untrusted(f"```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```")
+            + "\n\nSuggest additional relationships.")
+    text = llm.complete(SYSTEM_PROMPT, user, max_tokens=max_tokens, json_schema=SUGGESTION_SCHEMA)
+    data = extract_json(text)
+    if not isinstance(data, dict):
         return []
     out = []
     for r in data.get("relationships", []):

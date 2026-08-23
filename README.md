@@ -45,7 +45,8 @@ warehouse / dbt / SQL / Python / Airflow / Lambda / OpenLineage / DataHub  ─�
 pip install datagraph              # core: graph, warehouse/dbt/code extractors, lineage, profiling, modelling, wiki
 pip install "datagraph[sql]"       # + sqlglot: SQL files, view definitions, column-level lineage   (recommended)
 pip install "datagraph[mcp]"       # + MCP server for Claude Code / Claude Desktop / Cursor
-pip install "datagraph[ai]"        # + Claude: plain-language explanations and the LLM lineage fallback
+pip install "datagraph[ai]"        # + Anthropic Claude for explanations / LLM lineage fallback
+pip install "datagraph[bedrock]"   # + Amazon Bedrock (Nova, Claude on Bedrock, Llama ...) for the same; OpenAI-compatible needs nothing extra
 pip install "datagraph[all]"       # everything (also PyYAML for YAML lineage files / serverless.yml)
 ```
 
@@ -275,6 +276,27 @@ print(explain_impact(analysis))                                          # expla
 apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)     # tagged provenance=llm, excludable
 ```
 
+## Optional AI layer and LLM providers
+
+The AI layer is optional and never builds the graph: `datagraph explain` narrates an impact analysis, `datagraph enrich` /
+`build --llm-fallback` asks for relationship *suggestions* (schema-validated, must reference existing nodes, tagged `llm`,
+confidence-gated). Three interchangeable providers; pick with `--provider` or `DATAGRAPH_LLM_PROVIDER`, model with `--model` or
+`DATAGRAPH_LLM_MODEL`; credentials always come from the environment / cloud SDK, never from the graph:
+
+| Provider | Install | Credentials | Default model | Example |
+|---|---|---|---|---|
+| `anthropic` (default) | `datagraph[ai]` | `ANTHROPIC_API_KEY` | `claude-opus-5` | `datagraph explain dbt:customer` |
+| `bedrock` — Amazon Nova, Claude on Bedrock, Llama, Mistral … | `datagraph[bedrock]` | standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`, profile, SSO, instance role) | `amazon.nova-pro-v1:0` | `datagraph explain dbt:customer --provider bedrock --model amazon.nova-pro-v1:0` |
+| `openai` — any OpenAI-compatible endpoint (OpenAI, Azure, Ollama, vLLM, Groq …) | nothing extra | `DATAGRAPH_LLM_API_KEY` (+ `DATAGRAPH_LLM_BASE_URL`, e.g. `http://localhost:11434/v1` for Ollama) | `gpt-4o-mini` | `DATAGRAPH_LLM_PROVIDER=openai DATAGRAPH_LLM_BASE_URL=http://localhost:11434/v1 datagraph enrich --model llama3 --dry-run` |
+
+```python
+from datagraph.ai import explain_impact, suggest_lineage, BedrockProvider
+print(explain_impact(analysis, provider="bedrock", model="amazon.nova-pro-v1:0"))
+suggest_lineage(graph, provider=BedrockProvider(model="anthropic.claude-3-5-sonnet-20241022-v2:0", region="us-east-1"))
+```
+
+Everything else — lineage, relationships, profiling, dimensional modelling, wiki, MCP — needs no LLM at all.
+
 ## Security
 
 - **Deterministic core, no LLM in the loop.** Graph, lineage, profiling and the dimensional model are computed from artifacts; an LLM
@@ -335,7 +357,7 @@ which way change flows (`contains`, `writes_to`, `exposes` forward; `calls`, `im
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e ".[dev]"
-pytest            # 134 tests, offline, ~20 s — includes dbt's real jaffle_shop project as a fixture
+pytest            # 140 tests, offline, ~20 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
 Docs: `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from

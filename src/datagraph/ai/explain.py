@@ -4,16 +4,20 @@ The graph itself is never built by an LLM. The model only receives the
 already-computed blast radius and turns it into an explanation, a risk
 narrative, and a review checklist.
 
-Install with: ``pip install datagraph[ai]`` and set ``ANTHROPIC_API_KEY``.
+Providers: Anthropic (default), Amazon Bedrock (Nova, Claude on Bedrock, ...), or any
+OpenAI-compatible endpoint — see ``datagraph.ai.providers``. Install with
+``pip install datagraph[ai]`` (Anthropic) or ``datagraph[bedrock]`` and set the
+provider's credentials in the environment.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from ..analysis import ImpactAnalysis
 from ..security import UNTRUSTED_NOTICE, wrap_untrusted
+from .providers import get_provider
 
 SYSTEM_PROMPT = (
     "You are a senior data platform engineer reviewing a proposed change. "
@@ -29,43 +33,20 @@ SYSTEM_PROMPT = (
 
 def explain_impact(
     analysis: ImpactAnalysis,
-    model: str = "claude-opus-5",
+    model: Optional[str] = None,
     api_key: Optional[str] = None,
     max_tokens: int = 16000,
+    provider: Optional[Any] = None,
 ) -> str:
     """Return a plain-language explanation of an impact analysis.
 
-    Requires the ``anthropic`` package and an API key (argument or the
-    ``ANTHROPIC_API_KEY`` environment variable / an ``ant auth login`` profile).
+    ``provider`` is an ``LLMProvider`` instance or a name ('anthropic' | 'bedrock' | 'openai');
+    omitted -> ``$DATAGRAPH_LLM_PROVIDER`` or Anthropic. ``model`` overrides the provider default.
     """
-    try:
-        import anthropic
-    except ImportError as e:
-        raise ImportError(
-            "The AI explanation layer requires the 'anthropic' package. "
-            "Install it with: pip install datagraph[ai]"
-        ) from e
-
-    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
-
+    llm = get_provider(provider, model=model, api_key=api_key)
     payload = json.dumps(analysis.to_dict(), indent=2, sort_keys=True)
-    with client.messages.stream(
-        model=model,
-        max_tokens=max_tokens,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Here is the change impact analysis as JSON:\n\n"
-                    + wrap_untrusted(f"```json\n{payload}\n```")
-                    + "\n\nExplain the impact of this change."
-                ),
-            }
-        ],
-    ) as stream:
-        response = stream.get_final_message()
-
-    if response.stop_reason == "refusal":
-        return "(The model declined to analyze this request.)"
-    return "".join(block.text for block in response.content if block.type == "text")
+    user = ("Here is the change impact analysis as JSON:\n\n"
+            + wrap_untrusted(f"```json\n{payload}\n```")
+            + "\n\nExplain the impact of this change.")
+    text = llm.complete(SYSTEM_PROMPT, user, max_tokens=max_tokens)
+    return text or "(The model declined to analyze this request.)"

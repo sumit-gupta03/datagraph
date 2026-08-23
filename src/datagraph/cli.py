@@ -82,13 +82,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_build.add_argument("--update", action="store_true", help="Skip the build if inputs are unchanged")
     p_build.add_argument("--llm-fallback", action="store_true",
                          help="After building, ask Claude for relationships the parsers could not derive (tagged llm; needs [ai])")
-    p_build.add_argument("--llm-model", default="claude-opus-5")
+    p_build.add_argument("--llm-model", default=None)
+    p_build.add_argument("--llm-provider", default=None, help="LLM provider for --llm-fallback: anthropic | bedrock | openai")
     p_build.add_argument("--llm-min-confidence", type=float, default=0.6)
 
     p_enrich = sub.add_parser("enrich", help="Add LLM-suggested relationships (llm provenance) to an existing graph")
     p_enrich.add_argument("--graph", default=DEFAULT_GRAPH)
     p_enrich.add_argument("--unparsed", default=None, help="JSON file of unparsed SQL snippets (default: <graph>.unparsed.json if present)")
-    p_enrich.add_argument("--model", default="claude-opus-5")
+    p_enrich.add_argument("--model", default=None, help="Model id (default: provider default / $DATAGRAPH_LLM_MODEL)")
+    p_enrich.add_argument("--provider", default=None, help="anthropic | bedrock | openai (default: $DATAGRAPH_LLM_PROVIDER or anthropic)")
     p_enrich.add_argument("--min-confidence", type=float, default=0.6)
     p_enrich.add_argument("--dry-run", action="store_true", help="Print suggestions, do not modify the graph")
     p_enrich.add_argument("--json", action="store_true")
@@ -209,7 +211,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_explain.add_argument("nodes", nargs="+", help="Node ids, names, or paths")
     p_explain.add_argument("--graph", default=DEFAULT_GRAPH)
     p_explain.add_argument("--max-depth", type=int, default=None)
-    p_explain.add_argument("--model", default="claude-opus-5")
+    p_explain.add_argument("--model", default=None, help="Model id (default: provider default / $DATAGRAPH_LLM_MODEL)")
+    p_explain.add_argument("--provider", default=None, help="anthropic | bedrock | openai (default: $DATAGRAPH_LLM_PROVIDER or anthropic)")
 
     p_mcp = sub.add_parser("mcp", help="Serve the graph over MCP (stdio)")
     p_mcp.add_argument("--graph", default=DEFAULT_GRAPH)
@@ -412,7 +415,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if args.llm_fallback:
         from .ai import apply_suggestions, suggest_lineage
 
-        suggestions = suggest_lineage(graph, unparsed_sql=_UNPARSED, model=args.llm_model)
+        suggestions = suggest_lineage(graph, unparsed_sql=_UNPARSED, model=args.llm_model, provider=getattr(args, "llm_provider", None))
         added = apply_suggestions(graph, suggestions, min_confidence=args.llm_min_confidence)
         print(f"llm fallback: {len(suggestions)} suggestion(s), {added} edge(s) added (provenance=llm)")
     graph.save(args.output)
@@ -427,7 +430,7 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     graph = _load_graph(args.graph)
     unparsed_file = Path(args.unparsed) if args.unparsed else Path(str(args.graph) + ".unparsed.json")
     unparsed = json.loads(unparsed_file.read_text(encoding="utf-8")) if unparsed_file.exists() else []
-    suggestions = suggest_lineage(graph, unparsed_sql=unparsed, model=args.model)
+    suggestions = suggest_lineage(graph, unparsed_sql=unparsed, model=args.model, provider=args.provider)
     if args.json:
         print(json.dumps(suggestions, indent=2))
     else:
@@ -805,7 +808,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         return 2
     render_analysis(graph, analysis)
     print("\n--- AI explanation ---\n")
-    print(explain_impact(analysis, model=args.model))
+    print(explain_impact(analysis, model=args.model, provider=args.provider))
     return 0
 
 
