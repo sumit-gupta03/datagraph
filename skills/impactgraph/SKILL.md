@@ -1,44 +1,44 @@
 ---
 name: impactgraph
-description: Change-impact analysis for code and data. Use before merging or when asked "what breaks if I change this?" — runs impactgraph on the current git diff (or a named file/function/dbt model/table/column) and returns the blast radius across Python code, dbt models, warehouse tables, columns and dashboards, with a risk level, owners to notify and a test plan. Triggers on: "impact", "what depends on", "what breaks", "blast radius", "is this change safe", "downstream", "lineage", "before I merge".
+description: Change-impact, lineage and schema-relationship analysis for code and data. Use before merging or when asked "what breaks if I change this?", "where does this table/column come from?", "what depends on X?", "show me the lineage", "how are these tables related?" — runs impactgraph on the current git diff or a named file/function/dbt model/table/column and returns the blast radius across Python/JS code, Airflow tasks, Lambdas, dbt models, warehouse tables, columns and dashboards, with risk level, owners to notify and a test plan. Triggers on: impact, what depends on, what breaks, blast radius, is this change safe, downstream, upstream, lineage, relationships, foreign keys, schema map, before I merge.
 ---
 
-# impactgraph — is this change safe?
+# impactgraph — is this change safe? where does this data come from?
 
-impactgraph builds a deterministic graph (Python AST, dbt manifest, SQL lineage, git diff,
-OpenLineage / DataHub lineage, warehouse information_schema) and computes what a change can break.
-The graph is never built by an LLM; you only explain its output.
-
-## When to use
-- Before merging a change that touches data models, SQL, or code that feeds data.
-- When the user asks what depends on / what breaks if / how risky a change is.
-- On request for a blast radius, downstream list, or who to notify.
+impactgraph builds a deterministic graph (Python/JS AST, dbt manifest incl. compiled-SQL column
+lineage, SQL files, git diff, Airflow DAGs, Lambda templates, OpenLineage / DataHub lineage,
+warehouse information_schema incl. foreign keys) and computes what a change can break and
+where data comes from. The graph is never built by an LLM; an LLM may only *suggest* extra
+relationships as a fallback and those are tagged `llm`. You explain the output — do not invent nodes.
 
 ## Steps
 1. Make sure a graph exists (skip if `impactgraph.json` is present and fresh):
    ```bash
    impactgraph build --repo . --dbt-manifest target/manifest.json --sql sql -o impactgraph.json --update
    ```
-   Add `--openlineage events.json` or `--lineage-file lineage.yml` if the repo has them.
-2. For the current change:
-   ```bash
-   impactgraph diff --repo . --graph impactgraph.json --json
-   ```
-   For a named thing (dbt model, table, column, function, file):
-   ```bash
-   impactgraph impact dbt:customer --graph impactgraph.json --json
-   impactgraph impact column:dim_customer.customer_key --graph impactgraph.json --json
-   ```
-   Useful extras: `--no-inferred` (only artifact-backed edges), `paths A B`, `hotspots`,
-   `html NODE -o impact.html` for an interactive view.
+   Add whatever the repo has: `--airflow dags/`, `--lambda template.yaml`, `--js web/`,
+   `--openlineage events.json`, `--lineage-file lineage.yml`, `--warehouse prod.db` (or a SQLAlchemy URL),
+   `--datahub https://datahub.company.com` (token in `$DATAHUB_TOKEN`).
+2. Pick the question:
+   - **What breaks if I merge this?** `impactgraph diff --repo . --graph impactgraph.json --json`
+   - **What breaks if X changes?** `impactgraph impact dbt:customer --json` (also tables, columns, functions, tasks)
+   - **Where does X come from / what does it feed?** `impactgraph lineage table:prod.analytics.dim_customer --json`
+   - **How are the tables related?** `impactgraph relationships --json` (foreign keys, lineage, per-table columns)
+   - **Which nodes are most dangerous to change?** `impactgraph hotspots --json`
+   - **Show a picture:** `impactgraph html dbt:customer -o impact.html`, `impactgraph lineage X --html lineage.html`,
+     `impactgraph html --all -o graph.html`
+   - Add `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls and llm suggestions).
 3. Read the JSON: `risk.level`, `affected_by_type`, `owners`, `recommended_tests`, and `trees`
-   (each child has `via` = edge type and `provenance` = extracted|inferred).
-4. Report to the user: what changed, what can break and why (walk the tree), whether the risk
-   level looks right, who to notify, and the tests to run before and after deploy. Mark anything
-   that came via an `inferred` edge as a heuristic. Do not invent nodes that are not in the output.
+   (each child has `via` = edge type/source and `provenance` = extracted | inferred | llm).
+4. Report: what changed, what can break and why (walk the tree), whether the risk level looks right,
+   who to notify, tests to run before/after deploy. Mark anything reached via `inferred`/`llm` edges as a heuristic.
 
 ## Notes
 - Node ids: `file:path`, `func:path::name`, `dbt:model`, `source:src.name`, `table:db.schema.name`,
-  `column:model.col`, `exposure:name`, `job:namespace/name`.
-- If the graph is missing, run step 1; if a reference is ambiguous the CLI lists candidates.
-- `impactgraph mcp --graph impactgraph.json` exposes the same as MCP tools (impact, diff, find_nodes, paths, hotspots).
+  `column:parent.col` (lower-case), `exposure:name`, `job:namespace/name`, `dag:id`, `task:dag/task`,
+  `lambda:name`, `api:METHOD /path`.
+- If a reference is ambiguous the CLI lists candidates; `impactgraph nodes --search x` finds ids.
+- If lineage is missing for some SQL the parsers could not read, `impactgraph enrich --dry-run` shows what
+  Claude would suggest; `impactgraph enrich` adds it with `llm` provenance (needs `[ai]`).
+- `impactgraph mcp --graph impactgraph.json` exposes the same as MCP tools
+  (impact, diff, find_nodes, paths, hotspots, lineage, relationships).

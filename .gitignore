@@ -24,3 +24,9 @@ examples/demo/impactgraph.json
 Thumbs.db
 .idea/
 .vscode/
+
+# example outputs
+examples/**/*.html
+examples/**/impactgraph.json
+examples/**/*.cache.json
+examples/**/*.unparsed.json

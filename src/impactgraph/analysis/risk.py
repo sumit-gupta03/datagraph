@@ -20,6 +20,7 @@ NODE_WEIGHTS: Dict[NodeType, int] = {
     NodeType.DBT_SEED: 2,
     NodeType.DBT_SOURCE: 2,
     NodeType.DAG: 3,
+    NodeType.TASK: 2,
     NodeType.FUNCTION: 1,
     NodeType.CLASS: 1,
     NodeType.COLUMN: 1,

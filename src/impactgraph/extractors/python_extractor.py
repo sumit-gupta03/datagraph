@@ -11,8 +11,9 @@ import ast
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from ..graph import INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType
+from ..graph import EXTRACTED, INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
+from .sql_in_code import looks_like_sql, sql_tables
 
 _SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".tox", "dist", "build"}
 
@@ -81,6 +82,20 @@ class PythonExtractor(Extractor):
                         Edge(src=file_id, dst=target_file, type=EdgeType.IMPORTS)
                     )
 
+            # SQL embedded in code -> automatic code<->data bridge edges
+            for owner_qualname, sql_text in _sql_strings(tree):
+                owner_id = f"func:{rel}::{owner_qualname}" if owner_qualname else file_id
+                if graph.get_node(owner_id) is None:
+                    continue
+                reads, writes, certain = sql_tables(sql_text)
+                prov = EXTRACTED if certain else INFERRED
+                for t in reads:
+                    graph.add_edge(Edge(src=owner_id, dst=f"table:{t}", type=EdgeType.DEPENDS_ON,
+                                        meta={"provenance": prov, "via": "sql-in-code"}))
+                for t in writes:
+                    graph.add_edge(Edge(src=owner_id, dst=f"table:{t}", type=EdgeType.WRITES_TO,
+                                        meta={"provenance": prov, "via": "sql-in-code"}))
+
             for caller_qualname, callee_name in _calls(tree):
                 caller_id = f"func:{rel}::{caller_qualname}"
                 if graph.get_node(caller_id) is None:
@@ -145,6 +160,44 @@ def _imported_modules(tree: ast.Module) -> List[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             out.append(node.module)
     return out
+
+
+def _sql_strings(tree: ast.Module) -> List[Tuple[str, str]]:
+    """Yield (owner_qualname or "" for module level, sql_text) for SQL-looking strings.
+
+    f-strings are flattened with their expressions replaced by ``{}`` so the
+    table names that ARE literal can still be found (and marked inferred)."""
+    results: List[Tuple[str, str]] = []
+
+    def text_of(node) -> str:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for v in node.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    parts.append(v.value)
+                else:
+                    parts.append("{}")
+            return "".join(parts)
+        return ""
+
+    def visit(node: ast.AST, prefix: str, owner: str):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qual = f"{prefix}{child.name}"
+                visit(child, f"{qual}.", qual)
+            elif isinstance(child, ast.ClassDef):
+                visit(child, f"{prefix}{child.name}.", owner)
+            elif isinstance(child, (ast.Constant, ast.JoinedStr)):
+                s = text_of(child)
+                if looks_like_sql(s):
+                    results.append((owner, s))
+            else:
+                visit(child, prefix, owner)
+
+    visit(tree, "", "")
+    return results
 
 
 def _calls(tree: ast.Module) -> List[Tuple[str, str]]:

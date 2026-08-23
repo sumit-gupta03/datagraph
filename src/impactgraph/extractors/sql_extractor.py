@@ -44,6 +44,8 @@ class SqlExtractor(Extractor):
         _require_sqlglot()
         self.root = Path(root).resolve()
         self.dialect = dialect
+        # SQL the parser could not handle — candidates for the LLM fallback (ai.suggest_lineage)
+        self.unparsed: List[Dict[str, str]] = []
 
     def extract(self) -> ImpactGraph:
         graph = ImpactGraph()
@@ -54,11 +56,15 @@ class SqlExtractor(Extractor):
             text = path.read_text(encoding="utf-8-sig", errors="replace")
             try:
                 statements = sqlglot.parse(text, read=self.dialect)
-            except Exception:
+            except Exception as e:
+                self.unparsed.append({"where": rel, "sql": text, "error": str(e)[:200]})
                 continue
             for stmt in statements:
                 if stmt is not None:
-                    self._extract_statement(graph, stmt, file_id)
+                    try:
+                        self._extract_statement(graph, stmt, file_id)
+                    except Exception as e:
+                        self.unparsed.append({"where": rel, "sql": stmt.sql(), "error": str(e)[:200]})
         return graph
 
     def _extract_statement(self, graph: ImpactGraph, stmt, file_id: str) -> None:
@@ -117,8 +123,22 @@ def source_tables(stmt, exclude=frozenset()) -> List[str]:
     return out
 
 
+def _final_select(query):
+    """The SELECT whose projections are the statement's output (the last one in a CTE chain / union)."""
+    if isinstance(query, exp.Select):
+        return query
+    if isinstance(query, exp.Union):
+        return _final_select(query.this)
+    if isinstance(query, exp.Subquery):
+        return _final_select(query.this)
+    inner = getattr(query, "expression", None)
+    if inner is not None and inner.find(exp.Select) is not None:
+        return _final_select(inner)
+    return query.find(exp.Select)
+
+
 def output_columns(query) -> List[str]:
-    select = query if isinstance(query, exp.Select) else query.find(exp.Select)
+    select = _final_select(query)
     if select is None:
         return []
     cols: List[str] = []
@@ -131,17 +151,45 @@ def output_columns(query) -> List[str]:
     return cols
 
 
-def column_lineage(query, dialect: Optional[str] = None) -> Dict[str, List[Tuple[str, str]]]:
+def qualify_with_schema(query, dialect: Optional[str] = None, schema=None):
+    """Return (qualified_query, output_columns) — expanding ``SELECT *`` through CTEs and,
+    when a ``schema`` mapping ({db: {schema: {table: {col: type}}}}) is given, through
+    base tables. Falls back to the unqualified query when qualification fails."""
+    _require_sqlglot()
+    try:
+        from sqlglot.optimizer.qualify import qualify
+        from sqlglot.schema import MappingSchema
+
+        ms = MappingSchema(schema, dialect=dialect) if isinstance(schema, dict) else schema
+        qualified = qualify(query.copy(), schema=ms, dialect=dialect, expand_stars=True, validate_qualify_columns=False)
+        cols = output_columns(qualified)
+        if cols:
+            return qualified, cols
+    except Exception:
+        pass
+    return query, output_columns(query)
+
+
+def column_lineage(query, dialect: Optional[str] = None, schema=None) -> Dict[str, List[Tuple[str, str]]]:
     """Map each output column of ``query`` to its source (table_name, column) leaves.
 
-    Uses sqlglot's lineage engine; CTEs and aliases are resolved. Returns an
-    empty mapping for columns it cannot trace (e.g. SELECT *).
+    Uses sqlglot's lineage engine; CTEs and aliases are resolved, and ``SELECT *``
+    is expanded through CTEs and (with ``schema``) through base tables.
     """
     _require_sqlglot()
     result: Dict[str, List[Tuple[str, str]]] = {}
-    for col in output_columns(query):
+    qualified, cols = qualify_with_schema(query, dialect, schema)
+    ms = None
+    if isinstance(schema, dict):
         try:
-            node = _sqlglot_lineage(col, query, dialect=dialect)
+            from sqlglot.schema import MappingSchema
+
+            ms = MappingSchema(schema, dialect=dialect)
+        except Exception:
+            ms = None
+    for col in cols:
+        try:
+            node = _sqlglot_lineage(col, qualified, schema=ms if ms is not None else schema, dialect=dialect)
         except Exception:
             continue
         sources: List[Tuple[str, str]] = []
@@ -167,22 +215,25 @@ def add_column_lineage(
     query,
     dialect: Optional[str] = None,
     resolve_relation=None,
+    schema=None,
 ) -> int:
     """Emit COLUMN nodes and column->column DEPENDS_ON edges for ``query``.
 
     ``resolve_relation(table_name_lower) -> (node_id, display_name)`` lets the
     dbt extractor map relation names in compiled SQL back to model/source
-    nodes; by default relations map to ``table:<name>`` nodes.
+    nodes; by default relations map to ``table:<name>`` nodes. ``schema`` is a
+    nested mapping of known columns used to expand ``SELECT *``.
     Returns the number of column edges added.
     """
     added = 0
     # Column ids are lower-cased: SQL identifiers are case-insensitive in most
     # warehouses and sqlglot normalizes them per dialect (Snowflake -> UPPER).
-    for out_col in output_columns(query):
+    _qualified, out_cols = qualify_with_schema(query, dialect, schema)
+    for out_col in out_cols:
         col_id = f"column:{_bare(target_id)}.{out_col.lower()}"
         graph.add_node(Node(id=col_id, type=NodeType.COLUMN, name=out_col.lower(), meta={"parent": target_id}))
         graph.add_edge(Edge(src=target_id, dst=col_id, type=EdgeType.CONTAINS))
-    for out_col, sources in column_lineage(query, dialect).items():
+    for out_col, sources in column_lineage(query, dialect, schema).items():
         col_id = f"column:{_bare(target_id)}.{out_col.lower()}"
         for src_table, src_col in sources:
             if resolve_relation is not None:
