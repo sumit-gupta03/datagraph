@@ -1,27 +1,82 @@
-# datagraph
+<h1 align="center">datagraph</h1>
 
-**The data engine: lineage · relationships · data profiling · dimensional modelling · knowledge graph for AI assistants — built deterministically from your database, dbt project, SQL and code.**
+<p align="center">
+  <b>The open-source data engine: lineage · relationships · data profiling · dimensional modelling · knowledge graph for AI assistants</b><br>
+  built <i>deterministically</i> from your database, dbt project, SQL and code — no LLM in the loop.
+</p>
 
-Give datagraph a connection (and/or a dbt manifest, SQL, code) and it builds one graph of tables, columns, models, jobs and code,
-then answers from that graph — locally, in seconds, with no LLM in the loop:
+<p align="center">
+  <a href="https://pypi.org/project/datagraph-core/"><img alt="PyPI" src="https://img.shields.io/pypi/v/datagraph-core?label=datagraph-core&color=blue"></a>
+  <a href="https://pypi.org/project/datagraph-core/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/datagraph-core"></a>
+  <a href="https://github.com/sumit-gupta03/datagraph/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sumit-gupta03/datagraph/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/sumit-gupta03/datagraph/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="https://pypi.org/project/impactgraph/"><img alt="impactgraph" src="https://img.shields.io/pypi/v/impactgraph?label=impactgraph&color=orange"></a>
+</p>
 
-- **Where does this table / column come from and what does it feed?** (lineage, column level)
-- **How are my tables related?** (foreign keys, view lineage, schema map)
-- **What does the data look like?** (row counts, freshness, nulls, distincts — sensitive columns masked)
-- **What is my dimensional model?** (Kimball facts / dimensions / bus matrix / SCD / issues, or a proposed star from a wide table)
-- **Give my AI assistant the context.** (`context` packs, a Markdown wiki + `llms.txt`, an MCP server)
-- **If I change this, what breaks?** (impact, risk, owners, tests — and the companion PR check
-  [impactgraph](https://github.com/sumit-gupta03/impactgraph) built on this engine)
-
+```bash
+pip install "datagraph-core[sql]"
+datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analytics -o out/
+#  -> lineage.html · relationships.json · MODEL.md + er-diagram.mmd · profiles · wiki/ (for AI assistants) · datagraph.json
 ```
-warehouse / dbt / SQL / Python / Airflow / Lambda / OpenLineage / DataHub  ──►  one deterministic graph
-        ──►  lineage · relationships · profiles · dimensional model · impact  ──►  CLI · HTML · JSON · wiki · MCP
+
+> **Brownfield data platform, hundreds of tables, no documentation?** One command turns the schema (and dbt / SQL / code if you have them)
+> into a graph you can query: where does this come from, what does it feed, how are the tables related, what does the data look like,
+> what is the dimensional model, what breaks if I change this — and hands the same graph to your AI assistant over MCP.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph IN["📥 Inputs (any combination)"]
+        W[("Warehouse / DB<br/>information_schema<br/>FKs · views · types")]
+        D["dbt manifest + catalog"]
+        S["SQL files"]
+        C["Python / JS code<br/>Airflow · Lambda"]
+        O["OpenLineage · DataHub<br/>· plugins"]
+    end
+    subgraph X["⚙️ Deterministic extractors"]
+        E["AST · sqlglot · metadata · git diff<br/>every edge tagged extracted / inferred / llm"]
+    end
+    subgraph G["🕸️ One graph"]
+        N["tables · columns · models · sources<br/>functions · DAG tasks · lambdas · APIs · dashboards"]
+    end
+    subgraph A["🔎 Analyses"]
+        L["Lineage<br/>table + column"]
+        R["Relationships<br/>FKs · schema map"]
+        P["Profiling<br/>rows · nulls · distinct · freshness"]
+        M["Dimensional model<br/>Kimball facts / dims / bus matrix / SCD"]
+        I["Impact<br/>blast radius · risk · owners · tests"]
+    end
+    subgraph OUT["📤 Outputs"]
+        T["CLI · JSON · interactive HTML"]
+        K["Wiki · llms.txt · context packs"]
+        MCP["MCP server<br/>Claude Code · Cursor · Claude Desktop"]
+        PR["impactgraph<br/>PR comment · GitHub Action"]
+    end
+    W & D & S & C & O --> E --> N
+    N --> L & R & P & M & I
+    L & R & P & M --> T & K & MCP
+    I --> PR
+    AI(["optional LLM — Anthropic · Bedrock/Nova · OpenAI-compatible<br/><i>explains results, never builds the graph</i>"]) -.-> T
 ```
 
 <p align="center">
-  <img src="docs/images/lineage-jaffle-customers.png" alt="Lineage of the customers model in dbt's jaffle_shop project" width="900"><br>
-  <em><code>datagraph lineage customers --html</code> on dbt's public jaffle_shop project: upstream through staging models to seed files, downstream to the table and its columns.</em>
+  <img src="https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/lineage-jaffle-customers.png" alt="Lineage of the customers model in dbt's jaffle_shop project" width="900"><br>
+  <em>Real output: <code>datagraph lineage customers --html</code> on dbt's public jaffle_shop project — upstream through staging models to seed files, downstream to the table and its columns.</em>
 </p>
+
+## Why datagraph
+
+| You ask | datagraph answers with | From |
+|---|---|---|
+| Where does this table / column come from, what does it feed? | column-level lineage, interactive HTML, JSON | `lineage` |
+| How are my tables related? | foreign keys, view lineage, per-table column map | `relationships` |
+| What does the data look like? | row counts, freshness, null %, distinct, min/max, top values (sensitive columns masked) | `profile` |
+| What is my dimensional model — is it sound? | Kimball facts / dimensions / bridges, bus matrix, grain, SCD types, issues; star-schema proposal from a wide table | `model` |
+| Give my AI assistant the context | `context` packs, Markdown wiki + `llms.txt`, stdio MCP server | `context` · `wiki` · `mcp` |
+| If I change this, what breaks? | blast radius, risk score, owners, test plan; PR comment via impactgraph | `impact` · `diff` |
+
+**Principles:** the graph is built deterministically from artifacts (never by an LLM) · every edge carries provenance (`extracted` / `inferred` / `llm`) and `--no-inferred` strips heuristics · nothing to deploy — pip, one JSON file, runs in CI · secrets never stored, personal data masked · LLMs are optional and only *explain*.
 
 ## Contents
 
@@ -62,6 +117,18 @@ From source: `pip install "datagraph-core[sql] @ git+https://github.com/sumit-gu
 ```bash
 datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analytics,raw -o out/
 datagraph analyze --warehouse warehouse.db -o out/            # a SQLite / DuckDB file works too
+```
+
+```mermaid
+flowchart LR
+    A["🔌 connect<br/>(read-only role)"] --> B["📐 schema<br/>tables · columns · PK/FK · views"]
+    B --> C["🕸️ graph<br/>datagraph.json"]
+    C --> D["🔗 relationships.json"]
+    C --> E["📊 profiling<br/>rows · nulls · distinct · freshness<br/>(sensitive columns masked)"]
+    C --> F["⭐ Kimball model<br/>MODEL.md · model.json · er-diagram.mmd"]
+    C --> G["🖼️ lineage.html"]
+    C --> H["📚 wiki/ + llms.txt<br/>for AI assistants"]
+    H --> I["🤖 datagraph mcp<br/>Claude Code · Cursor"]
 ```
 
 One command runs the standard sequence (use a **read-only** database role; the password is never stored or logged):
@@ -139,6 +206,62 @@ datagraph model --from-table wide_orders          # propose fact + dimensions fr
 datagraph model --no-inferred                     # declared foreign keys only
 ```
 
+Real output of `datagraph model --mermaid` on a small warehouse (fact + three dimensions, SCD type 2 detected on `dim_product`):
+
+```mermaid
+erDiagram
+  fact_sales {
+    numeric amount
+    key customer_id FK
+    key date_key FK
+    key product_id FK
+    numeric quantity
+    key sale_id PK
+  }
+  dim_customer {
+    key customer_id PK
+    string country
+    string email
+    string name
+    string updated_at
+  }
+  dim_product {
+    key product_id PK
+    string category
+    string is_current
+    string product_name
+    string valid_from
+    string valid_to
+  }
+  dim_date {
+    key date_key PK
+    string full_date
+    string month
+    string year
+  }
+  fact_sales }o--|| dim_customer : "customer_id"
+  fact_sales }o--|| dim_product : "product_id"
+  fact_sales }o--|| dim_date : "date_key"
+```
+
+…and the matching report:
+
+```
+## Bus matrix (facts x dimensions)
+| fact       | dim_customer | dim_product | dim_date |
+|------------|--------------|-------------|----------|
+| fact_sales | X            | X           | X        |
+
+### table:fact_sales - fact (confidence 0.95)
+- grain: date_key, customer_id, product_id        - measures: amount, quantity
+- Kimball: process `sales` -> grain: one row per date_key x customer_id x product_id -> 3 dimension(s) -> 2 fact measure(s)
+
+## Dimensions
+- dim_customer - key customer_id, 4 attribute(s), used by fact_sales; SCD type 1
+- dim_product  - key product_id,  5 attribute(s), used by fact_sales; SCD type 2
+- dim_date     - key date_key,    3 attribute(s), used by fact_sales; SCD type static
+```
+
 Standard Kimball approach, computed deterministically and **explained** (every classification lists its reasons):
 
 - **Column roles** — pk / fk / date / measure / flag / attribute from names, declared types (warehouse or dbt catalog) and profiles.
@@ -201,6 +324,18 @@ fact_booking come from?"*, *"how are these tables related?"*, *"what is the dime
 
 ## Impact analysis & the impactgraph companion
 
+```mermaid
+flowchart LR
+    classDef changed fill:#ffe0b2,stroke:#e65100,stroke-width:2px
+    classDef hit fill:#fde2e2,stroke:#c62828
+    F["func load_customers()<br/><i>git diff</i>"]:::changed -->|writes_to| T["table analytics.customer"]:::hit
+    T -->|depends_on ⟲| M1["dbt dim_customer"]:::hit
+    M1 -->|depends_on ⟲| M2["dbt fact_booking"]:::hit
+    M2 -->|exposes| D1["📊 revenue_report<br/>owner: finance"]:::hit
+    M2 -->|exposes| D2["📊 customer_dashboard<br/>owner: growth"]:::hit
+    M2 -.->|"risk HIGH · notify finance, growth<br/>tests: pytest -k load_customers · dbt build --select dim_customer+"| R(( ))
+```
+
 ```bash
 datagraph impact dbt:customer                    # a model / table / column / function / task
 datagraph diff --repo . --graph datagraph.json   # what my uncommitted change can break
@@ -227,7 +362,7 @@ Recommended tests:
 ```
 
 <p align="center">
-  <img src="docs/images/impact-demo.png" alt="Interactive blast-radius view" width="900"><br>
+  <img src="https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/impact-demo.png" alt="Interactive blast-radius view" width="900"><br>
   <em><code>datagraph html models/customer.sql</code> — one SQL file → models → tables → dashboards and the Python API, with risk, owners and the test plan.</em>
 </p>
 
