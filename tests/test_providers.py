@@ -128,3 +128,20 @@ def test_get_provider_resolution(monkeypatch):
         get_provider("bedrock", model="amazon.nova-lite-v1:0")
     except ImportError as e:
         assert "boto3" in str(e)
+
+
+def test_bedrock_clamps_and_retries_on_model_limit():
+    class Limited:
+        def __init__(self):
+            self.calls = []
+
+        def converse(self, **kwargs):
+            self.calls.append(kwargs["inferenceConfig"]["maxTokens"])
+            if kwargs["inferenceConfig"]["maxTokens"] > 5000:
+                raise RuntimeError("ValidationException: The maximum tokens you requested exceeds the model limit of 5000.")
+            return {"output": {"message": {"content": [{"text": "ok"}]}}}
+
+    stub = Limited()
+    p = BedrockProvider(model="amazon.nova-lite-v1:0", client=stub)
+    assert p.complete("s", "u", max_tokens=16000) == "ok"
+    assert stub.calls[0] <= 8000 and stub.calls[1] == 4999

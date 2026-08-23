@@ -27,7 +27,7 @@ from .extractors import (
     collect_changes,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 __all__ = [
     "build_wiki", "context", "profile_warehouse", "classify_tables", "star_schema", "propose_from_table", "ExtractorPlugin", "register",

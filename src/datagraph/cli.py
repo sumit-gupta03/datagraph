@@ -430,7 +430,11 @@ def _cmd_enrich(args: argparse.Namespace) -> int:
     graph = _load_graph(args.graph)
     unparsed_file = Path(args.unparsed) if args.unparsed else Path(str(args.graph) + ".unparsed.json")
     unparsed = json.loads(unparsed_file.read_text(encoding="utf-8")) if unparsed_file.exists() else []
-    suggestions = suggest_lineage(graph, unparsed_sql=unparsed, model=args.model, provider=args.provider)
+    try:
+        suggestions = suggest_lineage(graph, unparsed_sql=unparsed, model=args.model, provider=args.provider)
+    except Exception as exc:  # noqa: BLE001 - provider / network errors: clean message, no traceback
+        print(f"error: LLM provider failed: {redact_dsn(str(exc))[:400]}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(suggestions, indent=2))
     else:
@@ -808,7 +812,11 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         return 2
     render_analysis(graph, analysis)
     print("\n--- AI explanation ---\n")
-    print(explain_impact(analysis, model=args.model, provider=args.provider))
+    try:
+        print(explain_impact(analysis, model=args.model, provider=args.provider))
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: LLM provider failed: {redact_dsn(str(exc))[:400]}", file=sys.stderr)
+        return 2
     return 0
 
 

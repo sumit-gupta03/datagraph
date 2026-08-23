@@ -116,13 +116,26 @@ class BedrockProvider(LLMProvider):
             session = boto3.Session(profile_name=profile) if profile else boto3.Session()
             self.client = session.client("bedrock-runtime", region_name=region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
 
+    # Bedrock models have per-model output caps (Nova: 10k, many others 4k-8k); clamp and retry once on the model's limit.
+    DEFAULT_MAX_TOKENS = int(os.environ.get("DATAGRAPH_LLM_MAX_TOKENS", "8000"))
+
     def complete(self, system: str, user: str, *, max_tokens: int = 4096, json_schema: Optional[Dict] = None) -> str:
-        response = self.client.converse(
-            modelId=self.model,
-            system=[{"text": system}],
-            messages=[{"role": "user", "content": [{"text": self._with_schema(user, json_schema)}]}],
-            inferenceConfig={"maxTokens": int(max_tokens), "temperature": 0.0},
-        )
+        budget = min(int(max_tokens), self.DEFAULT_MAX_TOKENS)
+        for attempt in (1, 2):
+            try:
+                response = self.client.converse(
+                    modelId=self.model,
+                    system=[{"text": system}],
+                    messages=[{"role": "user", "content": [{"text": self._with_schema(user, json_schema)}]}],
+                    inferenceConfig={"maxTokens": budget, "temperature": 0.0},
+                )
+                break
+            except Exception as e:  # botocore ValidationException carries the limit in its message
+                m = re.search(r"model limit of (\d+)", str(e))
+                if attempt == 1 and m and int(m.group(1)) < budget:
+                    budget = max(256, int(m.group(1)) - 1)
+                    continue
+                raise
         content = ((response.get("output") or {}).get("message") or {}).get("content") or []
         return "".join(part.get("text", "") for part in content if isinstance(part, dict))
 

@@ -295,6 +295,8 @@ print(explain_impact(analysis, provider="bedrock", model="amazon.nova-pro-v1:0")
 suggest_lineage(graph, provider=BedrockProvider(model="anthropic.claude-3-5-sonnet-20241022-v2:0", region="us-east-1"))
 ```
 
+Tested live on Amazon Bedrock with `amazon.nova-lite-v1:0` (explain + enrich). Bedrock per-model output caps are handled automatically (`DATAGRAPH_LLM_MAX_TOKENS` to override).
+
 Everything else — lineage, relationships, profiling, dimensional modelling, wiki, MCP — needs no LLM at all.
 
 ## Security
