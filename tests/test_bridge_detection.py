@@ -3,9 +3,9 @@
 import json
 import textwrap
 
-from impactgraph import EdgeType, ImpactGraph, PythonExtractor, DbtExtractor
-from impactgraph.cli import main
-from impactgraph.extractors.sql_in_code import looks_like_sql, sql_tables
+from datagraph import EdgeType, ImpactGraph, PythonExtractor, DbtExtractor
+from datagraph.cli import main
+from datagraph.extractors.sql_in_code import looks_like_sql, sql_tables
 
 
 def test_sql_tables_reads_writes_and_placeholders():

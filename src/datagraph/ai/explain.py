@@ -4,7 +4,7 @@ The graph itself is never built by an LLM. The model only receives the
 already-computed blast radius and turns it into an explanation, a risk
 narrative, and a review checklist.
 
-Install with: ``pip install impactgraph[ai]`` and set ``ANTHROPIC_API_KEY``.
+Install with: ``pip install datagraph[ai]`` and set ``ANTHROPIC_API_KEY``.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def explain_impact(
     except ImportError as e:
         raise ImportError(
             "The AI explanation layer requires the 'anthropic' package. "
-            "Install it with: pip install impactgraph[ai]"
+            "Install it with: pip install datagraph[ai]"
         ) from e
 
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()

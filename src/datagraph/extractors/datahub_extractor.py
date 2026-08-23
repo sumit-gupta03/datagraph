@@ -2,7 +2,7 @@
 
 Pulls datasets (name, platform, schema fields, owners) and their upstream
 lineage — including fine-grained (column) lineage — straight from a running
-DataHub instance, so impactgraph inherits the enterprise lineage DataHub
+DataHub instance, so datagraph inherits the enterprise lineage DataHub
 already collected and adds the code side on top.
 
     DataHubExtractor("https://datahub.company.com", token=os.environ["DATAHUB_TOKEN"]).extract()

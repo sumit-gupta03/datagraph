@@ -96,12 +96,12 @@ def watch(
 
 
 def install_hook(repo: str, command: str, hook: str = "post-commit") -> Path:
-    """Write a git hook that runs ``command`` (e.g. 'impactgraph build ... --update')."""
+    """Write a git hook that runs ``command`` (e.g. 'datagraph build ... --update')."""
     hooks_dir = Path(repo) / ".git" / "hooks"
     if not hooks_dir.exists():
         raise FileNotFoundError(f"{hooks_dir} not found — is {repo} a git repository?")
     path = hooks_dir / hook
-    path.write_text("#!/bin/sh\n# installed by impactgraph\n" + command + "\n", encoding="utf-8")
+    path.write_text("#!/bin/sh\n# installed by datagraph\n" + command + "\n", encoding="utf-8")
     try:
         os.chmod(path, path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     except OSError:

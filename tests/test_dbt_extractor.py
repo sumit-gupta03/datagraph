@@ -1,5 +1,5 @@
-from impactgraph import NodeType
-from impactgraph.analysis import analyze_impact
+from datagraph import NodeType
+from datagraph.analysis import analyze_impact
 
 
 def test_models_sources_exposures_extracted(dbt_graph):

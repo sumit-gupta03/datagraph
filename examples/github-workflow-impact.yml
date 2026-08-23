@@ -1,4 +1,4 @@
-# Copy to .github/workflows/impact.yml in a repo that uses impactgraph.
+# Copy to .github/workflows/impact.yml in a repo that uses datagraph.
 name: change impact
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       # Build your dbt manifest first if you want data lineage, e.g.:
       # - run: pip install dbt-core dbt-snowflake && dbt compile
-      - uses: sumit-gupta03/impactgraph@main
+      - uses: sumit-gupta03/datagraph@main
         with:
           repo-path: src
           dbt-manifest: target/manifest.json

@@ -18,7 +18,7 @@ Backends:
     SQLAlchemy URL (if SQLAlchemy is installed) into a connection.
 
 Pair it with ``diff_graphs`` to detect schema drift between two snapshots, and
-with ``impactgraph html --all`` / ``impactgraph relationships`` to display it.
+with ``datagraph html --all`` / ``datagraph relationships`` to display it.
 """
 
 from __future__ import annotations

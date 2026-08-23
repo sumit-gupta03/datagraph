@@ -1,4 +1,4 @@
-"""impactgraph command-line interface.
+"""datagraph command-line interface.
 
   build       Build the unified graph from artifacts (--update skips when inputs unchanged)
   impact      Blast radius of one or more nodes (--html for an interactive view)
@@ -36,7 +36,7 @@ from .extractors import (
 from .graph import ImpactGraph, diff_graphs
 from .report import render_analysis
 
-DEFAULT_GRAPH = "impactgraph.json"
+DEFAULT_GRAPH = "datagraph.json"
 
 
 def _add_build_args(p: argparse.ArgumentParser) -> None:
@@ -71,7 +71,7 @@ def _add_analysis_args(p: argparse.ArgumentParser) -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="impactgraph",
+        prog="datagraph",
         description="AI-powered Change Impact Graph: if I change this, what can break?",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -159,7 +159,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p_hook_install = sub.add_parser("hook-install", help="Install a git post-commit hook that rebuilds the graph")
     p_hook_install.add_argument("--git-repo", default=".", help="Git repository to install the hook into")
-    p_hook_install.add_argument("--command", dest="hook_cmd", default=None, help="Command to run (default: impactgraph build ... --update)")
+    p_hook_install.add_argument("--command", dest="hook_cmd", default=None, help="Command to run (default: datagraph build ... --update)")
     _add_build_args(p_hook_install)
 
     p_explain = sub.add_parser("explain", help="AI explanation of an impact analysis")
@@ -209,7 +209,7 @@ def _dispatch(args: argparse.Namespace) -> int:
 def _load_graph(path: str) -> ImpactGraph:
     p = Path(path)
     if not p.exists():
-        raise FileNotFoundError(f"graph file '{path}' not found — run 'impactgraph build' first")
+        raise FileNotFoundError(f"graph file '{path}' not found — run 'datagraph build' first")
     return ImpactGraph.load(p)
 
 
@@ -334,7 +334,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if _UNPARSED:
         unparsed_path.write_text(json.dumps(_UNPARSED, indent=2), encoding="utf-8")
         print(f"note: {len(_UNPARSED)} SQL snippet(s) could not be parsed -> {unparsed_path} "
-              f"(run 'impactgraph enrich' or build with --llm-fallback to let Claude suggest their lineage)")
+              f"(run 'datagraph enrich' or build with --llm-fallback to let Claude suggest their lineage)")
     elif unparsed_path.exists():
         unparsed_path.unlink()
     if args.llm_fallback:
@@ -593,7 +593,7 @@ def _cmd_hook_install(args: argparse.Namespace) -> int:
     else:
         if not _require_inputs(args):
             return 2
-        parts = ["impactgraph", "build", "--update", "-o", args.output]
+        parts = ["datagraph", "build", "--update", "-o", args.output]
         for flag, value in (("--repo", args.repo), ("--dbt-manifest", args.dbt_manifest), ("--sql", args.sql),
                             ("--openlineage", args.openlineage), ("--lineage-file", args.lineage_file)):
             if value:

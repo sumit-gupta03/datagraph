@@ -3,8 +3,8 @@ import textwrap
 
 import pytest
 
-from impactgraph import maintenance
-from impactgraph.mcp_server import build_tools
+from datagraph import maintenance
+from datagraph.mcp_server import build_tools
 
 
 def test_mcp_tools_without_runtime(tmp_path, dbt_graph):
@@ -57,6 +57,6 @@ def test_watch_rebuilds_on_change(tmp_path):
 
 def test_install_hook(tmp_path):
     (tmp_path / ".git" / "hooks").mkdir(parents=True)
-    path = maintenance.install_hook(str(tmp_path), "impactgraph build --repo . --update")
+    path = maintenance.install_hook(str(tmp_path), "datagraph build --repo . --update")
     assert path.exists()
-    assert "impactgraph build" in path.read_text(encoding="utf-8")
+    assert "datagraph build" in path.read_text(encoding="utf-8")

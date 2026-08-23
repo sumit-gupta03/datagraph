@@ -4,8 +4,8 @@ import io
 
 from rich.console import Console
 
-from impactgraph.analysis import analyze_impact
-from impactgraph.report import render_analysis
+from datagraph.analysis import analyze_impact
+from datagraph.report import render_analysis
 
 
 def _render_with_encoding(graph, analysis, encoding: str) -> str:

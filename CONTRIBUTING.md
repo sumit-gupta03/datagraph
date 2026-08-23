@@ -1,4 +1,4 @@
-# Contributing to impactgraph
+# Contributing to datagraph
 
 Thanks for your interest! Contributions of all kinds are welcome — extractors,
 bug fixes, docs, and real-world feedback on the impact model.
@@ -6,8 +6,8 @@ bug fixes, docs, and real-world feedback on the impact model.
 ## Getting started
 
 ```bash
-git clone https://github.com/sumit-gupta03/impactgraph
-cd impactgraph
+git clone https://github.com/sumit-gupta03/datagraph
+cd datagraph
 python -m venv .venv && . .venv/bin/activate   # or .venv\Scripts\activate on Windows
 pip install -e ".[dev]"
 pytest
@@ -30,12 +30,12 @@ pytest
 The most valuable contributions are new extractors (Airflow DAGs, AWS Lambda,
 OpenLineage import, Looker, ...). The recipe:
 
-1. Subclass `impactgraph.extractors.base.Extractor` and implement
+1. Subclass `datagraph.extractors.base.Extractor` and implement
    `extract() -> ImpactGraph`.
 2. Follow the node id conventions in the README (`file:...`, `func:...`,
    `dbt:...`, `table:...`) so fragments merge across extractors.
 3. Emit `CONTAINS` edges from source files to the things defined in them —
-   that's what makes `impactgraph diff` map git changes to your nodes.
+   that's what makes `datagraph diff` map git changes to your nodes.
 4. Add a pytest module with a small synthetic fixture (see
    `tests/test_dbt_extractor.py` for the pattern). No network, no real
    warehouse — tests must run offline.
@@ -44,7 +44,7 @@ OpenLineage import, Looker, ...). The recipe:
 
 - One logical change per PR; include tests.
 - `pytest` must pass on Python 3.9+ (CI runs Ubuntu and Windows).
-- Keep public API changes (`impactgraph/__init__.py`) noted in the PR
+- Keep public API changes (`datagraph/__init__.py`) noted in the PR
   description.
 
 ## Reporting bugs

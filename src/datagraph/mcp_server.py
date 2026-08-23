@@ -1,7 +1,7 @@
-"""MCP server exposing impactgraph to AI coding assistants (Claude Code, Cursor, ...).
+"""MCP server exposing datagraph to AI coding assistants (Claude Code, Cursor, ...).
 
-Run with ``impactgraph mcp --graph impactgraph.json`` (stdio transport). Requires
-the ``mcp`` package: ``pip install impactgraph[mcp]``.
+Run with ``datagraph mcp --graph datagraph.json`` (stdio transport). Requires
+the ``mcp`` package: ``pip install datagraph[mcp]``.
 
 The tool implementations live in ``build_tools`` as plain functions so they can
 be tested without the MCP runtime.
@@ -22,7 +22,7 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
 
     def _graph() -> ImpactGraph:
         if not Path(graph_path).exists():
-            raise FileNotFoundError(f"graph file '{graph_path}' not found — run 'impactgraph build' first")
+            raise FileNotFoundError(f"graph file '{graph_path}' not found — run 'datagraph build' first")
         return ImpactGraph.load(graph_path)
 
     def impact(nodes: List[str], max_depth: Optional[int] = None, include_inferred: bool = True) -> dict:
@@ -84,8 +84,8 @@ def serve(graph_path: str) -> None:
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as e:
-        raise ImportError("The MCP server requires the 'mcp' package: pip install impactgraph[mcp]") from e
-    mcp = FastMCP("impactgraph")
+        raise ImportError("The MCP server requires the 'mcp' package: pip install datagraph[mcp]") from e
+    mcp = FastMCP("datagraph")
     for name, fn in build_tools(graph_path).items():
         mcp.tool(name=name)(fn)
     mcp.run()

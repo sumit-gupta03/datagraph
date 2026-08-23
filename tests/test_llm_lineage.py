@@ -7,9 +7,9 @@ import types
 
 import pytest
 
-from impactgraph import LLM, WarehouseExtractor
-from impactgraph.ai import apply_suggestions, schema_summary, suggest_lineage
-from impactgraph.cli import main
+from datagraph import LLM, WarehouseExtractor
+from datagraph.ai import apply_suggestions, schema_summary, suggest_lineage
+from datagraph.cli import main
 
 
 @pytest.fixture
@@ -138,5 +138,5 @@ def test_missing_anthropic_is_a_clear_error(no_fk_db, monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake)
     graph = WarehouseExtractor(str(no_fk_db)).extract()
-    with pytest.raises(ImportError, match=r"impactgraph\[ai\]"):
+    with pytest.raises(ImportError, match=r"datagraph\[ai\]"):
         suggest_lineage(graph)

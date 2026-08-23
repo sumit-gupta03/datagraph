@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from impactgraph import LineageFileExtractor
+from datagraph import LineageFileExtractor
 
 DOC = {
     "version": 1,

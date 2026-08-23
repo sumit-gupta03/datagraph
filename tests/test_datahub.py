@@ -1,4 +1,4 @@
-from impactgraph import DataHubExtractor, NodeType
+from datagraph import DataHubExtractor, NodeType
 
 
 def _urn(name):

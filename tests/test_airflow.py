@@ -1,7 +1,7 @@
 import textwrap
 
-from impactgraph import AirflowExtractor, NodeType
-from impactgraph.cli import main
+from datagraph import AirflowExtractor, NodeType
+from datagraph.cli import main
 
 DAG_FILE = textwrap.dedent('''
     from airflow import DAG

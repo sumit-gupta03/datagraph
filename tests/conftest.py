@@ -3,7 +3,7 @@ import textwrap
 
 import pytest
 
-from impactgraph import DbtExtractor, ImpactGraph, PythonExtractor
+from datagraph import DbtExtractor, ImpactGraph, PythonExtractor
 
 
 @pytest.fixture

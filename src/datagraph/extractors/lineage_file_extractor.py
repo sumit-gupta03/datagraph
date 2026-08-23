@@ -1,7 +1,7 @@
 """Lineage-file importer (DataHub "lineage file" format and a simple superset).
 
 DataHub lets you declare lineage in a YAML/JSON file (its ``datahub-lineage-file``
-source). impactgraph reads the same shape, so lineage curated for DataHub can be
+source). datagraph reads the same shape, so lineage curated for DataHub can be
 dropped straight into the impact graph::
 
     version: 1
@@ -10,7 +10,7 @@ dropped straight into the impact graph::
         upstream:
           - entity: {name: analytics.dim_customer, type: dataset, platform: snowflake}
           - entity: {name: raw.bookings, type: dataset, platform: snowflake}
-        # optional extensions understood by impactgraph:
+        # optional extensions understood by datagraph:
         owner: finance
         columns:                       # column-level lineage
           customer_key:
@@ -19,7 +19,7 @@ dropped straight into the impact graph::
           - upstreams: [analytics.dim_customer.customer_key]
             downstreams: [customer_key]
 
-YAML needs PyYAML (``pip install impactgraph[all]``); JSON always works.
+YAML needs PyYAML (``pip install datagraph[all]``); JSON always works.
 """
 
 from __future__ import annotations

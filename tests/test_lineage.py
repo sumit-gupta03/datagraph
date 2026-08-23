@@ -3,9 +3,9 @@ import json
 
 from rich.console import Console
 
-from impactgraph.cli import main
-from impactgraph.html_report import render_graph_html, render_lineage_html
-from impactgraph.report import render_lineage
+from datagraph.cli import main
+from datagraph.html_report import render_graph_html, render_lineage_html
+from datagraph.report import render_lineage
 
 
 def test_upstream_and_lineage(dbt_graph):

@@ -1,6 +1,6 @@
-name: "impactgraph — change impact on pull requests"
+name: "datagraph — change impact on pull requests"
 description: "Build the impact graph and post the blast radius of the PR's changes as a comment."
-author: "impactgraph"
+author: "datagraph"
 branding:
   icon: "git-branch"
   color: "orange"
@@ -42,9 +42,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install impactgraph
+    - name: Install datagraph
       shell: bash
-      run: python -m pip install --quiet "impactgraph[sql,yaml]"
+      run: python -m pip install --quiet "datagraph[sql,yaml]"
 
     - name: Build graph
       shell: bash
@@ -54,15 +54,15 @@ runs:
         [ -n "${{ inputs.sql-dir }}" ] && args="$args --sql '${{ inputs.sql-dir }}'"
         [ -n "${{ inputs.openlineage }}" ] && args="$args --openlineage '${{ inputs.openlineage }}'"
         [ -n "${{ inputs.lineage-file }}" ] && args="$args --lineage-file '${{ inputs.lineage-file }}'"
-        eval impactgraph build $args -o impactgraph.json
+        eval datagraph build $args -o datagraph.json
 
     - name: Compute impact of this PR
       id: impact
       shell: bash
       run: |
         git fetch origin "${{ github.base_ref }}" --depth=1 || true
-        impactgraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph impactgraph.json --json > impact.json || true
-        impactgraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph impactgraph.json > impact.txt 2>/dev/null || true
+        datagraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph datagraph.json --json > impact.json || true
+        datagraph diff --repo "${{ inputs.repo-path }}" --base "${{ inputs.base-ref }}" --graph datagraph.json > impact.txt 2>/dev/null || true
         level=$(python -c "import json;print(json.load(open('impact.json')).get('risk',{}).get('level','LOW'))" 2>/dev/null || echo LOW)
         echo "level=$level" >> "$GITHUB_OUTPUT"
 
@@ -73,7 +73,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         {
-          echo "### ⚠ impactgraph — change impact (risk: **${{ steps.impact.outputs.level }}**)"
+          echo "### ⚠ datagraph — change impact (risk: **${{ steps.impact.outputs.level }}**)"
           echo
           echo '```'
           cat impact.txt

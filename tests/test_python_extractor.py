@@ -1,4 +1,4 @@
-from impactgraph import NodeType
+from datagraph import NodeType
 
 
 def test_files_and_functions_extracted(py_graph):
