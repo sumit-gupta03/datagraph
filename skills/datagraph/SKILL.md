@@ -25,6 +25,9 @@ relationships as a fallback and those are tagged `llm`. You explain the output â
    - **Where does X come from / what does it feed?** `datagraph lineage table:prod.analytics.dim_customer --json`
    - **How are the tables related?** `datagraph relationships --json` (foreign keys, lineage, per-table columns)
    - **Which nodes are most dangerous to change?** `datagraph hotspots --json`
+   - **Tell me about X / before editing X:** `datagraph context X` (columns + profile, owners, lineage, relationships, tests, risk, SQL)
+   - **Document everything for the team / a RAG bot:** `datagraph wiki -o kb/` (index.md, GRAPH_REPORT.md, llms.txt)
+   - **Data stats (row counts, nulls, distincts):** `datagraph profile --warehouse DSN` first, then the above show them
    - **Show a picture:** `datagraph html dbt:customer -o impact.html`, `datagraph lineage X --html lineage.html`,
      `datagraph html --all -o graph.html`
    - Add `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls and llm suggestions).
@@ -41,4 +44,4 @@ relationships as a fallback and those are tagged `llm`. You explain the output â
 - If lineage is missing for some SQL the parsers could not read, `datagraph enrich --dry-run` shows what
   Claude would suggest; `datagraph enrich` adds it with `llm` provenance (needs `[ai]`).
 - `datagraph mcp --graph datagraph.json` exposes the same as MCP tools
-  (impact, diff, find_nodes, paths, hotspots, lineage, relationships).
+  (impact, diff, find_nodes, paths, hotspots, lineage, relationships, context).

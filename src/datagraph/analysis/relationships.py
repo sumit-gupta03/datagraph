@@ -29,8 +29,11 @@ def relationships(graph: ImpactGraph, search: Optional[str] = None, include_colu
             continue
         via = e.meta.get("via", e.type.value)
         if e.type == EdgeType.CONTAINS and s.type in _TABLE_TYPES and d.type == NodeType.COLUMN:
-            cols_of.setdefault(s.id, []).append({"id": d.id, "name": d.name, "data_type": d.meta.get("data_type"),
-                                                 "primary_key": bool(d.meta.get("primary_key"))})
+            col = {"id": d.id, "name": d.name, "data_type": d.meta.get("data_type"),
+                   "primary_key": bool(d.meta.get("primary_key"))}
+            if d.meta.get("profile"):
+                col["profile"] = d.meta["profile"]
+            cols_of.setdefault(s.id, []).append(col)
         elif e.type in (EdgeType.DEPENDS_ON, EdgeType.WRITES_TO) and s.type in _TABLE_TYPES and d.type in _TABLE_TYPES:
             if e.type == EdgeType.DEPENDS_ON:
                 src_t, dst_t = s, d          # s depends on d
@@ -47,6 +50,7 @@ def relationships(graph: ImpactGraph, search: Optional[str] = None, include_colu
     for n in sorted(tables, key=lambda x: x.id):
         out_tables.append({
             "id": n.id, "name": n.name, "type": n.type.value, "owner": n.owner,
+            "profile": n.meta.get("profile"),
             "columns": sorted(cols_of.get(n.id, []), key=lambda c: c["name"]) if include_columns else [],
             "depends_on": sorted(depends.get(n.id, []), key=lambda r: r["target"]),
             "dependents": sorted(dependents.get(n.id, []), key=lambda r: r["source"]),

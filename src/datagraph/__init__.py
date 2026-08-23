@@ -8,6 +8,9 @@ lineage files, warehouse information_schema), then ask:
 
 from .graph import EXTRACTED, INFERRED, LLM, DataGraph, Edge, EdgeType, ImpactGraph, Node, NodeType, diff_graphs
 from .analysis import ImpactAnalysis, analyze_impact
+from .knowledge import build_wiki, context
+from .profiling import profile_warehouse
+from .extractors.registry import ExtractorPlugin, register
 from .extractors import (
     DbtExtractor,
     LineageFileExtractor,
@@ -23,9 +26,10 @@ from .extractors import (
     collect_changes,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
+    "build_wiki", "context", "profile_warehouse", "ExtractorPlugin", "register",
     "Edge",
     "EdgeType",
     "ImpactGraph",
