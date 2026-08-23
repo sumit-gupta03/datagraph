@@ -33,7 +33,8 @@ from .extractors import (
     changed_node_ids,
     collect_changes,
 )
-from .graph import ImpactGraph, diff_graphs
+from .security import redact_dsn
+from .graph import ImpactGraph, diff_graphs, NodeType
 from .report import render_analysis
 
 DEFAULT_GRAPH = "datagraph.json"
@@ -171,6 +172,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_model.add_argument("--mermaid", default=None, help="Write the ER diagram (Mermaid) here")
     p_model.add_argument("--markdown", default=None, help="Write the Markdown report here")
 
+    p_an = sub.add_parser("analyze", help="One shot for a database: connect -> graph (tables, columns, FKs, views) -> relationships -> profiling -> dimensional model -> lineage HTML -> wiki, into one folder")
+    p_an.add_argument("--warehouse", metavar="DSN", required=True, help=".db/.sqlite file, sqlite:///…, duckdb://…, or a SQLAlchemy URL (password is never stored)")
+    p_an.add_argument("--schemas", default=None, help="Comma-separated schemas to include")
+    p_an.add_argument("--database", default=None, help="Database/catalog filter")
+    p_an.add_argument("--dialect", default=None, help="SQL dialect for view definitions (snowflake, postgres, bigquery, ...)")
+    p_an.add_argument("-o", "--output", default="datagraph-out", help="Output folder")
+    p_an.add_argument("--no-profile", action="store_true", help="Skip data profiling (metadata only)")
+    p_an.add_argument("--sample", type=int, default=100000, help="Rows sampled per table for profiling")
+    p_an.add_argument("--no-top-values", action="store_true")
+    p_an.add_argument("--no-inferred", action="store_true", help="Declared foreign keys only for the model")
+    p_an.add_argument("--title", default="datagraph analysis")
+    p_an.add_argument("--json", action="store_true", help="Print the summary as JSON")
+
     p_plug = sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
 
     p_lin = sub.add_parser("lineage", help="Upstream (where it comes from) and downstream (what it feeds) of a node")
@@ -241,6 +255,7 @@ def _dispatch(args: argparse.Namespace) -> int:
         "context": _cmd_context,
         "plugins": _cmd_plugins,
         "model": _cmd_model,
+        "analyze": _cmd_analyze,
         "watch": _cmd_watch,
         "hook-install": _cmd_hook_install,
         "explain": _cmd_explain,
@@ -304,7 +319,7 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
         fragment = WarehouseExtractor(
             args.warehouse, database=args.warehouse_database, schemas=schemas, dialect=args.sql_dialect
         ).extract()
-        log(f"warehouse: {len(fragment)} nodes from {args.warehouse}")
+        log(f"warehouse: {len(fragment)} nodes from {redact_dsn(args.warehouse)}")
         graph.merge(fragment)
     if getattr(args, "airflow", None):
         from .extractors import AirflowExtractor
@@ -646,6 +661,54 @@ def _cmd_model(args: argparse.Namespace) -> int:
         print(json.dumps(model, indent=2, sort_keys=True, default=str))
     elif not (args.mermaid or args.markdown):
         print(to_markdown(model, title))
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    """Standard flow: connection + schema in -> lineage, relationships, profiling, dimensional model, wiki out."""
+    from .analysis.modeling import star_schema, to_markdown as model_md, to_mermaid
+    from .analysis.relationships import relationships
+    from .extractors.warehouse_extractor import WarehouseExtractor, connect
+    from .html_report import render_graph_html
+    from .knowledge import build_wiki
+    from .profiling import profile_warehouse
+
+    out = Path(args.output)
+    out.mkdir(parents=True, exist_ok=True)
+    schemas = [x.strip() for x in args.schemas.split(",")] if args.schemas else None
+    say = (lambda *a, **k: None) if args.json else print
+    say(f"connecting to {redact_dsn(args.warehouse)} ...")
+    connection = connect(args.warehouse)
+    graph = WarehouseExtractor(connection, database=args.database, schemas=schemas, dialect=args.dialect).extract()
+    graph.link_table_aliases()
+    n_tables = len([n for n in graph.nodes() if n.type in (NodeType.TABLE, NodeType.VIEW)])
+    say(f"schema: {n_tables} tables/views, {len(graph.nodes(NodeType.COLUMN))} columns, {len(graph.edges())} edges")
+    if not args.no_profile:
+        res = profile_warehouse(connection, graph, sample=args.sample, top_values=not args.no_top_values, log=None)
+        say(f"profiling: {len(res)} tables (sensitive-looking columns masked)")
+    graph.save(out / "datagraph.json")
+    rel = relationships(graph, include_columns=True)
+    (out / "relationships.json").write_text(json.dumps(rel, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    model = star_schema(graph, include_inferred=not args.no_inferred)
+    (out / "MODEL.md").write_text(model_md(model, f"Dimensional model - {args.title}"), encoding="utf-8")
+    (out / "model.json").write_text(json.dumps({k: v for k, v in model.items() if k != "classification"}, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    (out / "er-diagram.mmd").write_text(to_mermaid(model), encoding="utf-8")
+    (out / "lineage.html").write_text(render_graph_html(graph, title=args.title), encoding="utf-8")
+    stats = build_wiki(graph, out / "wiki", title=args.title)
+    summary = {
+        "output": str(out), "tables": n_tables, "columns": len(graph.nodes(NodeType.COLUMN)), "edges": len(graph.edges()),
+        "foreign_keys": len(rel.get("table_relationships", [])), "profiled": not args.no_profile,
+        "facts": [f["id"] for f in model["facts"]], "dimensions": [d["id"] for d in model["dimensions"]],
+        "conformed_dimensions": model["conformed_dimensions"], "issues": model["issues"][:20], "wiki_pages": stats["pages"],
+        "files": ["datagraph.json", "relationships.json", "MODEL.md", "model.json", "er-diagram.mmd", "lineage.html", "wiki/"],
+    }
+    if args.json:
+        print(json.dumps(summary, indent=2, default=str))
+        return 0
+    say(f"model: {len(model['facts'])} fact(s), {len(model['dimensions'])} dimension(s), {len(model['conformed_dimensions'])} conformed, {len(model['issues'])} issue(s)")
+    say(f"wiki: {stats['pages']} pages")
+    say(f"-> {out}/  (datagraph.json, relationships.json, MODEL.md, er-diagram.mmd, lineage.html, wiki/)")
+    say("next: datagraph lineage <table> --graph " + str(out / "datagraph.json") + "  |  datagraph context <table> --graph ...  |  datagraph mcp --graph ...")
     return 0
 
 

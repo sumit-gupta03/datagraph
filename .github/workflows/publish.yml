@@ -4,7 +4,7 @@
 #     PyPI project name: datagraph
 #     Owner: sumit-gupta03   Repository: datagraph
 #     Workflow name: publish.yml   Environment name: pypi
-# Then:  git tag v0.6.0 && git push origin v0.6.0
+# Then:  git tag v0.7.0 && git push origin v0.7.0
 name: Publish to PyPI
 
 on:

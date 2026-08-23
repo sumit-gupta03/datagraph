@@ -18,6 +18,7 @@ import datetime as _dt
 import sqlite3
 from typing import Dict, Iterable, List, Optional
 
+from .security import is_sensitive_column
 from .graph import ImpactGraph, NodeType
 
 _DATE_HINTS = ("date", "time", "timestamp", "_at", "_ts", "day")
@@ -78,13 +79,16 @@ def profile_warehouse(
                 n_rows = row[0] or 0
                 for i, col in enumerate(cols):
                     cnt, dist, mn, mx = row[1 + i * 4: 5 + i * 4]
+                    sensitive = is_sensitive_column(col.name)
                     cp = {
                         "null_pct": round(100.0 * (n_rows - (cnt or 0)) / n_rows, 2) if n_rows else None,
                         "distinct": dist,
-                        "min": _jsonable(mn),
-                        "max": _jsonable(mx),
+                        "min": None if sensitive else _jsonable(mn),
+                        "max": None if sensitive else _jsonable(mx),
                         "sampled_rows": n_rows,
                     }
+                    if sensitive:
+                        cp["masked"] = True  # counts only - no sample values for personal/secret-looking columns
                     col.meta["profile"] = cp
                 # freshness: max over date-like columns
                 fresh = [c.meta["profile"]["max"] for c in cols if c.meta.get("profile") and _looks_temporal(c) and c.meta["profile"].get("max") is not None]
@@ -92,6 +96,8 @@ def profile_warehouse(
                     prof["freshness"] = max(str(f) for f in fresh)
             if top_values:
                 for col in cols[:20]:
+                    if is_sensitive_column(col.name):
+                        continue
                     q = _q(col.name)
                     try:
                         rows = _rows(connection, f"SELECT {q}, COUNT(*) AS c FROM (SELECT {q} FROM {rel} LIMIT {int(sample)}) t GROUP BY {q} ORDER BY c DESC LIMIT 5")

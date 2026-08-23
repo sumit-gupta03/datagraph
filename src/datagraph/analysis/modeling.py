@@ -204,6 +204,12 @@ def classify_tables(graph: ImpactGraph, include_inferred: bool = True) -> Dict[s
             reasons.append(f"{rows} rows")
         role = "unknown"
         bridge = (n_out >= 2 or counts["fk"] >= 2) and counts["measure"] == 0 and counts["attribute"] == 0 and counts["date"] == 0
+        if t.type == NodeType.VIEW and not n_out and not n_in:
+            # a view with no key links is a derived/aggregate object, not a base fact or dimension
+            result[t.id] = {"id": t.id, "name": t.name, "type": t.type.value, "role": "derived", "confidence": 0.7,
+                            "reasons": ["view without key links - derived / aggregate object (report layer)"] + reasons,
+                            "columns": roles, "counts": counts, "row_count": rows, "fk_out": [], "fk_in": []}
+            continue
         if bridge:
             role, conf = "bridge", 0.8
         elif fact == 0 and dim == 0:
@@ -255,7 +261,11 @@ def star_schema(graph: ImpactGraph, include_inferred: bool = True) -> Dict:
         facts.append({"id": tid, "name": c["name"], "role": c["role"], "confidence": c["confidence"], "grain": grain,
                       "measures": measures, "dates": dates, "dimensions": dim_refs, "unresolved_keys": orphan_keys,
                       "degenerate_dimensions": degenerate, "row_count": c["row_count"]})
-        if not dates:
+        date_dim_keys = [d["via"] for d in dim_refs if _base(d["table"]) in ("dim_date", "dim_calendar", "date_dim", "dates", "calendar", "dim_time", "dim_datetime")]
+        if date_dim_keys:
+            grain = date_dim_keys[:1] + [g for g in grain if g not in date_dim_keys[:1]]
+            facts[-1]["grain"] = grain
+        if not dates and not date_dim_keys:
             issues.append(f"fact {tid} has no date/time column - no time grain for trending")
         if not dim_refs and not orphan_keys:
             issues.append(f"fact {tid} links to no dimension")
@@ -279,10 +289,49 @@ def star_schema(graph: ImpactGraph, include_inferred: bool = True) -> Dict:
         if m:
             issues.append(f"dimension {tid} carries measure-like columns ({', '.join(m[:4])}) - move to a fact or keep as attributes deliberately")
     conformed = [tid for tid, d in dims.items() if len(set(d["used_by"])) >= 2]
+    # --- Kimball standard views: bus matrix, four-step design per fact, SCD + surrogate-key hints
+    bus = {f["id"]: sorted({d["table"] for d in f["dimensions"]}) for f in facts}
+    for f in facts:
+        f["kimball"] = {
+            "1_business_process": _base(f["id"]).replace("fact_", "").replace("fct_", ""),
+            "2_grain": ("one row per " + " x ".join(f["grain"])) if f["grain"] else "undeclared - add a date and the dimension keys",
+            "3_dimensions": [d["table"] for d in f["dimensions"]],
+            "4_facts": f["measures"],
+            "additivity": {m: ("semi-additive" if any(w in m for w in ("balance", "inventory", "stock", "level", "headcount", "snapshot")) else "additive") for m in f["measures"]},
+        }
+    scd = {}
+    for tid, d in dims.items():
+        roles = cls[tid]["columns"]
+        names = set(roles)
+        has_history = bool(names & {"valid_from", "valid_to", "effective_from", "effective_to", "start_date", "end_date", "is_current", "current_flag", "row_effective_date", "row_expiration_date"})
+        has_updated = any(n in names for n in ("updated_at", "modified_at", "last_modified", "last_updated", "updated_date"))
+        key = d["key"]
+        is_date_dim = _base(tid) in ("dim_date", "dim_calendar", "date_dim", "dates", "calendar", "dim_time", "dim_datetime")
+        key_col = next((c for c in _columns(graph, tid) if c.name == key), None) if key else None
+        key_type = _dtype(key_col) if key_col else ""
+        surrogate_ok = bool(key) and (not key_type or any(w in key_type for w in _NUMERIC)) and not (key or "").endswith(("_code", "_number"))
+        scd[tid] = {
+            "scd_type": "static" if is_date_dim else (2 if has_history else (1 if has_updated else "undecided")),
+            "history_columns": sorted(names & {"valid_from", "valid_to", "effective_from", "effective_to", "start_date", "end_date", "is_current", "current_flag"}),
+            "surrogate_key": key if surrogate_ok else None,
+            "recommendation": ("static dimension (date/calendar) - no SCD needed" if is_date_dim else
+                               "SCD type 2 in place (history columns present)" if has_history else
+                               ("updated_at present but no history columns - decide SCD type 1 (overwrite) or add valid_from/valid_to/is_current for type 2" if has_updated else
+                                "no change tracking - SCD type 1 assumed; add valid_from/valid_to/is_current if history matters")),
+        }
+        d["scd"] = scd[tid]
+        if not surrogate_ok and key:
+            issues.append(f"dimension {tid}: key '{key}' is a natural/text key - standard practice is an integer surrogate key plus the natural key as an attribute")
+        if not is_date_dim and not any(n in names for n in ("updated_at", "modified_at", "valid_from", "effective_from", "is_current", "current_flag")) and d["attributes"]:
+            issues.append(f"dimension {tid}: no change-tracking columns - decide SCD type (1 overwrite / 2 history)")
+    has_date_dim = any(_base(tid) in ("dim_date", "dim_calendar", "date_dim", "dates", "calendar", "dim_time") for tid in dims)
+    if facts and not has_date_dim:
+        issues.append("no date dimension found - standard practice is a conformed dim_date joined by a date key from every fact")
     unknown = [tid for tid, c in cls.items() if c["role"] == "unknown"]
     if unknown:
         issues.append(f"{len(unknown)} table(s) could not be classified (no columns / keys known): " + ", ".join(unknown[:6]))
-    return {"facts": facts, "dimensions": list(dims.values()), "conformed_dimensions": conformed,
+    return {"facts": facts, "dimensions": list(dims.values()), "conformed_dimensions": conformed, "bus_matrix": bus,
+            "scd": scd, "standard": "Kimball dimensional modelling (business process -> grain -> dimensions -> facts; conformed dimensions via the bus matrix; SCD types)",
             "classification": cls, "issues": issues, "include_inferred": include_inferred}
 
 
@@ -414,8 +463,18 @@ def to_markdown(model: Dict, title: str = "Dimensional model") -> str:
             out += [f"- {n}" for n in model["notes"]]
         out += ["", "```mermaid", to_mermaid(model).rstrip(), "```", ""]
         return "\n".join(out)
-    out.append(f"{len(model['facts'])} fact(s), {len(model['dimensions'])} dimension(s), {len(model['conformed_dimensions'])} conformed")
+    out.append(f"{len(model['facts'])} fact(s), {len(model['dimensions'])} dimension(s), {len(model['conformed_dimensions'])} conformed - "
+               + model.get("standard", "Kimball dimensional modelling"))
     out.append("")
+    dim_ids = [d["id"] for d in model["dimensions"]]
+    if model["facts"] and dim_ids:
+        out.append("## Bus matrix (facts x dimensions)")
+        out.append("| fact | " + " | ".join(_base(d) for d in dim_ids) + " |")
+        out.append("|---|" + "---|" * len(dim_ids))
+        for f in model["facts"]:
+            used = set(model.get("bus_matrix", {}).get(f["id"], []))
+            out.append(f"| {_base(f['id'])} | " + " | ".join("X" if d in used else "" for d in dim_ids) + " |")
+        out.append("")
     out.append("## Facts")
     for f in model["facts"]:
         out.append(f"### `{f['id']}` - {f['role']} (confidence {f['confidence']})")
@@ -426,12 +485,23 @@ def to_markdown(model: Dict, title: str = "Dimensional model") -> str:
             out.append(f"- degenerate dimensions: {', '.join(f['degenerate_dimensions'][:10])}")
         if f["unresolved_keys"]:
             out.append(f"- unresolved keys: {', '.join(f['unresolved_keys'])}")
+        k = f.get("kimball")
+        if k:
+            out.append(f"- Kimball: process `{k['1_business_process']}` -> grain: {k['2_grain']} -> {len(k['3_dimensions'])} dimension(s) -> {len(k['4_facts'])} fact measure(s)"
+                       + (" (" + ", ".join(f"{m} {a}" for m, a in k["additivity"].items() if a != "additive") + ")" if any(a != "additive" for a in k["additivity"].values()) else ""))
         out.append("")
     out.append("## Dimensions")
     for d in model["dimensions"]:
         conf = " **conformed**" if d["id"] in model["conformed_dimensions"] else ""
-        out.append(f"- `{d['id']}`{conf} - key `{d['key'] or '?'}`, {len(d['attributes'])} attribute(s), used by {', '.join(sorted(set(d['used_by']))) or 'nobody'}")
-    others = [c for c in model["classification"].values() if c["role"] not in ("fact", "dimension", "bridge", "lookup")]
+        scd = d.get("scd") or {}
+        out.append(f"- `{d['id']}`{conf} - key `{d['key'] or '?'}`, {len(d['attributes'])} attribute(s), used by {', '.join(sorted(set(d['used_by']))) or 'nobody'}"
+                   + (f"; SCD type {scd['scd_type']}" if scd else ""))
+    derived = [c for c in model["classification"].values() if c["role"] == "derived"]
+    if derived:
+        out.append("")
+        out.append("## Derived / report objects (views without key links)")
+        out += [f"- `{c['id']}`" for c in derived]
+    others = [c for c in model["classification"].values() if c["role"] not in ("fact", "dimension", "bridge", "lookup", "derived")]
     if others:
         out.append("")
         out.append("## Unclassified")

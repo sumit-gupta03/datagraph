@@ -13,6 +13,7 @@ import json
 from typing import Optional
 
 from ..analysis import ImpactAnalysis
+from ..security import UNTRUSTED_NOTICE, wrap_untrusted
 
 SYSTEM_PROMPT = (
     "You are a senior data platform engineer reviewing a proposed change. "
@@ -22,7 +23,7 @@ SYSTEM_PROMPT = (
     "Write for the engineer about to merge this change: explain what was "
     "changed, what can break and why (walk the propagation paths), whether the "
     "stated risk level seems right, and what to verify before and after "
-    "deploying. Keep it focused and concrete."
+    "deploying. Keep it focused and concrete. " + UNTRUSTED_NOTICE
 )
 
 
@@ -57,8 +58,8 @@ def explain_impact(
                 "role": "user",
                 "content": (
                     "Here is the change impact analysis as JSON:\n\n"
-                    f"```json\n{payload}\n```\n\n"
-                    "Explain the impact of this change."
+                    + wrap_untrusted(f"```json\n{payload}\n```")
+                    + "\n\nExplain the impact of this change."
                 ),
             }
         ],

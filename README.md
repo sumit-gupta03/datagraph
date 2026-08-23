@@ -111,6 +111,20 @@ Recommended tests:
 
 `--json` for machines · `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls, same-name column guesses and `llm` suggestions) · `--html out.html` for the picture.
 
+### The standard flow: connection in → lineage, profiling, dimensional model out (v0.7)
+
+```bash
+datagraph analyze --warehouse "snowflake://user:pw@acct/db" --schemas analytics,raw -o out/
+# or a file:  datagraph analyze --warehouse warehouse.db -o out/
+```
+
+One command does the standard sequence: connect → read information_schema (tables, columns, types, primary/foreign keys, view
+definitions) → build the graph → relationships → profiling (row counts, freshness, null %, distinct, min/max, top values — sensitive-looking
+columns are masked) → Kimball dimensional model (facts, dimensions, bus matrix, SCD hints, issues) → interactive lineage HTML → Markdown
+wiki for assistants. Output folder: `datagraph.json`, `relationships.json`, `MODEL.md` + `er-diagram.mmd` + `model.json`, `lineage.html`,
+`wiki/`. Then ask questions: `datagraph lineage <table>`, `datagraph context <table>`, `datagraph mcp`. The password in the DSN is never
+stored or logged.
+
 ### Dimensional modelling (v0.6)
 
 ```bash
@@ -240,12 +254,32 @@ table:prod.analytics.customer  column:dim_customer.customer_key       job:airflo
 dag:nightly_bookings           task:nightly_bookings/build_dim        lambda:GetBookings    api:GET /bookings
 ```
 
+## Security
+
+- **Deterministic core, no LLM in the loop.** Graph, lineage, profiling and the dimensional model are computed from artifacts; an LLM
+  is optional, only *explains* or *suggests* (suggestions are schema-validated, must reference existing nodes, are tagged `llm`, and
+  are gated by `--min-confidence`). Nothing the LLM returns is executed.
+- **Prompt injection.** Names, descriptions, docs and SQL are data from your repos and warehouses. Every LLM prompt wraps them in
+  `<data>` tags with an instruction to never follow instructions found inside; text is stripped of control/bidi characters and
+  truncated; wiki/context output carries the same "untrusted text" notice for downstream assistants.
+- **Secrets.** Connection strings are used only to open a connection; they are never written to the graph, the cache or logs
+  (`redact_dsn` masks passwords everywhere a DSN is printed). Use environment variables / your driver's auth (key-pair, SSO) where possible.
+- **Personal data.** Profiling keeps counts but masks sample values (min/max/top values) for sensitive-looking columns (email, phone,
+  name, address, card, token, …); `--no-top-values` disables value sampling entirely; `--no-profile` skips data access.
+- **SQL / HTML injection.** Identifiers are quoted and literals escaped in every generated query; HTML reports escape embedded JSON so a
+  malicious table name cannot break out of the script tag.
+- **MCP server.** `datagraph mcp` is stdio-only (local process, no network port), read-only over a graph file you pass, takes no
+  connection strings, and its tool descriptions state that returned text is untrusted data.
+- **Plugins** load Python entry points — install only extractor packages you trust (same trust level as any pip package).
+- **Access.** Use a read-only database role for `build --warehouse` / `profile` / `analyze`; datagraph only ever issues `SELECT`s
+  against `information_schema` and the tables you profile.
+
 ## Development
 
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e .[dev]
-pytest            # 124 tests, offline, ~15 s — includes dbt's real jaffle_shop project as a fixture
+pytest            # 134 tests, offline, ~20 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
 ## Roadmap

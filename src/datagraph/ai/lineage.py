@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Optional
 
+from ..security import UNTRUSTED_NOTICE, sanitize_text, wrap_untrusted
 from ..graph import LLM, Edge, EdgeType, ImpactGraph, Node, NodeType
 
 SYSTEM_PROMPT = (
@@ -26,6 +27,7 @@ SYSTEM_PROMPT = (
     "implied by naming conventions (e.g. orders.customer_id -> customers.id). "
     "Use the exact node ids given. Never repeat a known relationship. Give a confidence between 0 and 1 "
     "and a one-sentence reason. If you are not reasonably confident, omit the relationship."
+    + " " + UNTRUSTED_NOTICE
 )
 
 SUGGESTION_SCHEMA = {
@@ -104,7 +106,7 @@ def suggest_lineage(
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     payload = schema_summary(graph, max_tables=max_tables)
     payload["unparsed_sql"] = [
-        {"where": u.get("where"), "sql": str(u.get("sql", ""))[:4000]} for u in (unparsed_sql or [])
+        {"where": sanitize_text(u.get("where"), 300), "sql": sanitize_text(u.get("sql", ""), 4000)} for u in (unparsed_sql or [])
     ][:50]
     response = client.messages.create(
         model=model,
@@ -112,8 +114,8 @@ def suggest_lineage(
         system=SYSTEM_PROMPT,
         output_config={"format": {"type": "json_schema", "schema": SUGGESTION_SCHEMA}},
         messages=[{"role": "user", "content": "Schema, known relationships and unparsed SQL as JSON:\n\n"
-                                               f"```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```\n\n"
-                                               "Suggest additional relationships."}],
+                                               + wrap_untrusted(f"```json\n{json.dumps(payload, indent=2, sort_keys=True)}\n```")
+                                               + "\n\nSuggest additional relationships."}],
     )
     if response.stop_reason == "refusal":
         return []

@@ -26,6 +26,7 @@ from __future__ import annotations
 import sqlite3
 from typing import List, Optional, Sequence, Union
 
+from ..security import escape_literal
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
 
@@ -81,9 +82,9 @@ class WarehouseExtractor(Extractor):
     def _where(self) -> str:
         clauses = []
         if self.database:
-            clauses.append(f"lower(table_catalog) = '{self.database.lower()}'")
+            clauses.append(f"lower(table_catalog) = {escape_literal(self.database.lower())}")
         if self.schemas:
-            quoted = ", ".join(f"'{s.lower()}'" for s in self.schemas)
+            quoted = ", ".join(escape_literal(s.lower()) for s in self.schemas)
             clauses.append(f"lower(table_schema) IN ({quoted})")
         else:
             clauses.append("lower(table_schema) NOT IN ('information_schema', 'pg_catalog')")

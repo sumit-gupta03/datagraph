@@ -19,6 +19,7 @@ from typing import Dict, Iterable, List, Optional
 from .analysis import ImpactAnalysis
 from .graph import IMPACT_DIRECTION, INFERRED, ImpactGraph, NodeType
 from .profiling import profile_summary
+from .security import escape_script_json
 
 _COLORS = {
     "file": "#8E8E93",
@@ -148,7 +149,7 @@ def _render(graph, depth: Dict[str, int], focus: set, title: str, subtitle: str,
         risk_color = {"LOW": "#34C759", "MEDIUM": "#FFCC00", "HIGH": "#FF9500", "CRITICAL": "#FF3B30"}.get(risk_level, "#999")
         risk_pill = f'<span class="pill" style="background:{risk_color}">Risk {risk_level} · score {risk["score"]}</span>'
     return (_TEMPLATE.replace("__TITLE__", html.escape(title)).replace("__SUBTITLE__", html.escape(subtitle))
-            .replace("__RISKPILL__", risk_pill).replace("__DATA__", data).replace("__COUNT__", html.escape(count_label)))
+            .replace("__RISKPILL__", risk_pill).replace("__DATA__", escape_script_json(data)).replace("__COUNT__", html.escape(count_label)))
 
 
 _TEMPLATE = """<!doctype html>
