@@ -1,14 +1,14 @@
-"""Dimensional modelling from the graph — deterministic, explainable.
+"""Dimensional modelling from the graph - deterministic, explainable.
 
-* ``classify_tables(graph)``     — fact / dimension / bridge / lookup per table-like node, with
+* ``classify_tables(graph)``     - fact / dimension / bridge / lookup per table-like node, with
                                    confidence and the reasons (column roles, keys, names, profile).
-* ``star_schema(graph)``         — the star(s): facts with grain, measures and dimensions; dimensions
+* ``star_schema(graph)``         - the star(s): facts with grain, measures and dimensions; dimensions
                                    with keys and attributes; conformed dimensions; snowflake chains;
                                    a list of issues worth fixing.
-* ``propose_from_table(graph, t)`` — split one wide/flat table into a proposed fact + dimensions
+* ``propose_from_table(graph, t)`` - split one wide/flat table into a proposed fact + dimensions
                                    (uses profiles when present: low-cardinality columns become
                                    dimension attributes, numeric columns measures, dates the grain).
-* ``to_mermaid(model)`` / ``to_markdown(model)`` — ER diagram and a readable report.
+* ``to_mermaid(model)`` / ``to_markdown(model)`` - ER diagram and a readable report.
 
 Foreign keys come from the warehouse (``extracted``); when a schema has none, links are inferred
 from names (``orders.customer_id`` -> ``customers``), tagged ``inferred`` so you know to verify.
@@ -163,6 +163,11 @@ def classify_tables(graph: ImpactGraph, include_inferred: bool = True) -> Dict[s
         cols = _columns(graph, t.id)
         base = _strip_prefix(_base(t.id))
         rows = (t.meta.get("profile") or {}).get("row_count")
+        if not cols:
+            result[t.id] = {"id": t.id, "name": t.name, "type": t.type.value, "role": "unknown", "confidence": 0.0,
+                            "reasons": ["no columns known (add a catalog / warehouse connection)"], "columns": {},
+                            "counts": {}, "row_count": rows, "fk_out": out_links.get(t.id, []), "fk_in": in_links.get(t.id, [])}
+            continue
         roles = {c.name: classify_column(c, base, rows) for c in cols}
         counts = {r: sum(1 for v in roles.values() if v == r) for r in ("pk", "fk", "date", "measure", "flag", "attribute")}
         n_out = len(out_links.get(t.id, []))
@@ -241,7 +246,7 @@ def star_schema(graph: ImpactGraph, include_inferred: bool = True) -> Dict:
             if l["to_table"] in dims:
                 dims[l["to_table"]]["used_by"].append(tid)
             elif cls.get(l["to_table"], {}).get("role") == "fact":
-                issues.append(f"{tid}.{l['from_column']} points at another fact ({l['to_table']}) — fact-to-fact link, consider a shared dimension")
+                issues.append(f"{tid}.{l['from_column']} points at another fact ({l['to_table']}) - fact-to-fact link, consider a shared dimension")
         orphan_keys = [k for k, r in c["columns"].items() if r == "fk" and k not in {d["via"] for d in dim_refs}]
         dates = [k for k, r in c["columns"].items() if r == "date"]
         measures = [k for k, r in c["columns"].items() if r == "measure"]
@@ -251,28 +256,28 @@ def star_schema(graph: ImpactGraph, include_inferred: bool = True) -> Dict:
                       "measures": measures, "dates": dates, "dimensions": dim_refs, "unresolved_keys": orphan_keys,
                       "degenerate_dimensions": degenerate, "row_count": c["row_count"]})
         if not dates:
-            issues.append(f"fact {tid} has no date/time column — no time grain for trending")
+            issues.append(f"fact {tid} has no date/time column - no time grain for trending")
         if not dim_refs and not orphan_keys:
             issues.append(f"fact {tid} links to no dimension")
         for k in orphan_keys:
             issues.append(f"{tid}.{k} looks like a foreign key but no matching dimension table was found")
         if not measures and c["role"] == "fact":
-            issues.append(f"fact {tid} has no numeric measure — factless fact (fine for events/coverage) or misclassified")
+            issues.append(f"fact {tid} has no numeric measure - factless fact (fine for events/coverage) or misclassified")
         for l in c["fk_out"]:
             if l["provenance"] == "inferred":
-                issues.append(f"{tid}.{l['from_column']} -> {l['to_table']} is inferred from names — verify or declare a foreign key")
+                issues.append(f"{tid}.{l['from_column']} -> {l['to_table']} is inferred from names - verify or declare a foreign key")
         prof_cols = {k: (graph.get_node(f"column:{tid.split(':',1)[1]}.{k}") or Node(id="x", type=NodeType.COLUMN, name=k)).meta.get("profile") for k in c["columns"]}
         for k, p in prof_cols.items():
             if p and c["columns"][k] == "fk" and (p.get("null_pct") or 0) > 20:
-                issues.append(f"{tid}.{k} is a key with {p['null_pct']}% nulls — late-arriving dimension or data quality issue")
+                issues.append(f"{tid}.{k} is a key with {p['null_pct']}% nulls - late-arriving dimension or data quality issue")
     for tid, d in dims.items():
         if not d["used_by"]:
             issues.append(f"dimension {tid} is not referenced by any fact")
         if d["snowflake_to"]:
-            issues.append(f"dimension {tid} links to {', '.join(d['snowflake_to'])} — snowflaked; consider flattening into one dimension")
+            issues.append(f"dimension {tid} links to {', '.join(d['snowflake_to'])} - snowflaked; consider flattening into one dimension")
         m = [k for k, r in cls[tid]["columns"].items() if r == "measure"]
         if m:
-            issues.append(f"dimension {tid} carries measure-like columns ({', '.join(m[:4])}) — move to a fact or keep as attributes deliberately")
+            issues.append(f"dimension {tid} carries measure-like columns ({', '.join(m[:4])}) - move to a fact or keep as attributes deliberately")
     conformed = [tid for tid, d in dims.items() if len(set(d["used_by"])) >= 2]
     unknown = [tid for tid, c in cls.items() if c["role"] == "unknown"]
     if unknown:
@@ -319,9 +324,9 @@ def propose_from_table(graph: ImpactGraph, table: str, max_attr_distinct: int = 
             "degenerate_dimensions": groups.get("__degenerate__", []), "source": t.id, "row_count": rows}
     notes = []
     if not measures:
-        notes.append("no numeric measures detected — this may be an event/factless fact")
+        notes.append("no numeric measures detected - this may be an event/factless fact")
     if not dates:
-        notes.append("no date column — add one to give the fact a time grain")
+        notes.append("no date column - add one to give the fact a time grain")
     if not dims:
         notes.append("no low-cardinality attributes found to form dimensions")
     return {"source": t.id, "fact": fact, "dimensions": dims, "column_roles": roles, "notes": notes}
@@ -395,8 +400,8 @@ def to_markdown(model: Dict, title: str = "Dimensional model") -> str:
         out.append("")
         out.append(f"## Fact: `{f['name']}`")
         out.append(f"- grain: {', '.join(f['grain']) or 'one row per source row'}")
-        out.append(f"- measures: {', '.join(f['measures']) or '—'}")
-        out.append(f"- foreign keys: {', '.join(f['foreign_keys']) or '—'}")
+        out.append(f"- measures: {', '.join(f['measures']) or '-'}")
+        out.append(f"- foreign keys: {', '.join(f['foreign_keys']) or '-'}")
         if f["degenerate_dimensions"]:
             out.append(f"- degenerate dimensions (kept on the fact): {', '.join(f['degenerate_dimensions'])}")
         out.append("")
@@ -413,10 +418,10 @@ def to_markdown(model: Dict, title: str = "Dimensional model") -> str:
     out.append("")
     out.append("## Facts")
     for f in model["facts"]:
-        out.append(f"### `{f['id']}` — {f['role']} (confidence {f['confidence']})")
+        out.append(f"### `{f['id']}` - {f['role']} (confidence {f['confidence']})")
         out.append(f"- grain: {', '.join(f['grain']) or 'unknown'}")
-        out.append(f"- measures: {', '.join(f['measures']) or '—'}")
-        out.append("- dimensions: " + (", ".join(f"{d['table']} via `{d['via']}`" + (" *(inferred)*" if d['provenance'] == 'inferred' else "") for d in f["dimensions"]) or "—"))
+        out.append(f"- measures: {', '.join(f['measures']) or '-'}")
+        out.append("- dimensions: " + (", ".join(f"{d['table']} via `{d['via']}`" + (" *(inferred)*" if d['provenance'] == 'inferred' else "") for d in f["dimensions"]) or "-"))
         if f["degenerate_dimensions"]:
             out.append(f"- degenerate dimensions: {', '.join(f['degenerate_dimensions'][:10])}")
         if f["unresolved_keys"]:
@@ -425,7 +430,7 @@ def to_markdown(model: Dict, title: str = "Dimensional model") -> str:
     out.append("## Dimensions")
     for d in model["dimensions"]:
         conf = " **conformed**" if d["id"] in model["conformed_dimensions"] else ""
-        out.append(f"- `{d['id']}`{conf} — key `{d['key'] or '?'}`, {len(d['attributes'])} attribute(s), used by {', '.join(sorted(set(d['used_by']))) or 'nobody'}")
+        out.append(f"- `{d['id']}`{conf} - key `{d['key'] or '?'}`, {len(d['attributes'])} attribute(s), used by {', '.join(sorted(set(d['used_by']))) or 'nobody'}")
     others = [c for c in model["classification"].values() if c["role"] not in ("fact", "dimension", "bridge", "lookup")]
     if others:
         out.append("")
