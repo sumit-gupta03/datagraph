@@ -35,6 +35,7 @@ _ASCII_ICONS = {
     "api": "[api] ",
     "lambda": "[fn] ",
     "dag": "[job] ",
+    "task": "[task] ",
 }
 
 _TYPE_ICONS = {
@@ -54,6 +55,7 @@ _TYPE_ICONS = {
     "api": "⇄ ",
     "lambda": "λ ",
     "dag": "⛓ ",
+    "task": "▸ ",
 }
 
 
@@ -104,14 +106,56 @@ def render_analysis(graph: ImpactGraph, analysis: ImpactAnalysis, console: Conso
         console.print(f"  {tick} {escape(rec)}")
 
 
+def render_lineage(
+    graph: ImpactGraph,
+    node_id: str,
+    upstream_depth=None,
+    downstream_depth=None,
+    include_inferred: bool = True,
+    console: Console | None = None,
+) -> None:
+    """Print where a node comes from (upstream) and what it feeds (downstream)."""
+    console = console or Console()
+    unicode_ok = (console.encoding or "").lower().replace("-", "").startswith("utf")
+    icons = _TYPE_ICONS if unicode_ok else _ASCII_ICONS
+    node = graph.get_node(node_id)
+    name = node.name if node else node_id
+    lin = graph.lineage(node_id, upstream_depth, downstream_depth, include_inferred)
+
+    header = Text()
+    header.append("Lineage\n\n", style="bold yellow")
+    header.append("Node: ", style="bold")
+    header.append(f"{name}  ", style="cyan")
+    header.append(f"({node.type.value})" if node else "", style="dim")
+    header.append(f"\n{len(lin['upstream'])} upstream · {len(lin['downstream'])} downstream")
+    if node and node.owner:
+        header.append(f"\nOwner: {node.owner}")
+    console.print(Panel(header, expand=False))
+
+    console.print("[bold]Upstream — where it comes from:[/bold]")
+    up_tree = graph.upstream_tree(node_id, max_depth=upstream_depth, include_inferred=include_inferred)
+    if up_tree["children"]:
+        console.print(_to_rich_tree(up_tree, icons))
+    else:
+        console.print("  (nothing upstream — this is a root / source)")
+    console.print()
+    console.print("[bold]Downstream — what it feeds:[/bold]")
+    down_tree = graph.impact_tree(node_id, max_depth=downstream_depth, include_inferred=include_inferred)
+    if down_tree["children"]:
+        console.print(_to_rich_tree(down_tree, icons))
+    else:
+        console.print("  (nothing downstream — this is a leaf)")
+
+
 def _to_rich_tree(entry: dict, icons: dict) -> Tree:
     icon = icons.get(entry.get("type", ""), "- ")
     label = f"{escape(icon)}[cyan]{escape(entry['name'])}[/cyan] [dim]({entry.get('type', '?')})[/dim]"
     via = entry.get("via")
     if via:
         label += f" [dim italic]via {escape(via)}[/dim italic]"
-    if entry.get("provenance") == INFERRED:
-        label += " [yellow dim](inferred)[/yellow dim]"
+    prov = entry.get("provenance", "extracted")
+    if prov != "extracted":
+        label += f" [yellow dim]({escape(str(prov))})[/yellow dim]"
     tree = Tree(label)
     for child in entry.get("children", []):
         tree.add(_to_rich_tree(child, icons))

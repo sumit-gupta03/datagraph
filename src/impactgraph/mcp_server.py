@@ -60,7 +60,24 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
         """Nodes with the largest blast radius — where a change hurts most."""
         return _graph().hotspots(top=top)
 
-    return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots}
+    def lineage(node: str, upstream_depth: Optional[int] = None, downstream_depth: Optional[int] = None) -> dict:
+        """Where a node comes from (upstream) and what it feeds (downstream), with trees."""
+        g = _graph()
+        n = g.resolve(node)
+        if n is None:
+            return {"error": "no matching node", "candidates": [m.id for m in g.find(node)][:20]}
+        lin = g.lineage(n.id, upstream_depth, downstream_depth)
+        return {"node": n.id, **lin, "upstream_tree": g.upstream_tree(n.id, upstream_depth),
+                "downstream_tree": g.impact_tree(n.id, downstream_depth)}
+
+    def relationships(search: Optional[str] = None, include_columns: bool = True) -> dict:
+        """All table and column relationships (foreign keys, lineage) — the schema map for data analysis."""
+        from .analysis.relationships import relationships as _rel
+
+        return _rel(_graph(), search=search, include_columns=include_columns)
+
+    return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
+            "lineage": lineage, "relationships": relationships}
 
 
 def serve(graph_path: str) -> None:

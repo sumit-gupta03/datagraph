@@ -42,10 +42,21 @@ DEFAULT_GRAPH = "impactgraph.json"
 def _add_build_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--repo", help="Path to a Python code repo to scan")
     p.add_argument("--dbt-manifest", help="Path to a dbt manifest.json")
+    p.add_argument("--dbt-catalog", help="Path to dbt catalog.json (from `dbt docs generate`) — expands SELECT * in column lineage; auto-detected next to the manifest")
     p.add_argument("--sql", help="Directory of .sql files (requires [sql] extra)")
     p.add_argument("--sql-dialect", default=None, help="sqlglot dialect (e.g. snowflake)")
     p.add_argument("--openlineage", help="OpenLineage events file (JSON array or NDJSON)")
     p.add_argument("--lineage-file", help="DataHub-style lineage file (YAML/JSON)")
+    p.add_argument("--warehouse", metavar="DSN", help="Database to read schema + foreign keys from: a .db/.sqlite file, sqlite:///…, duckdb://…, or a SQLAlchemy URL")
+    p.add_argument("--warehouse-schemas", default=None, help="Comma-separated schemas to include (default: all user schemas)")
+    p.add_argument("--warehouse-database", default=None, help="Database/catalog name filter")
+    p.add_argument("--airflow", help="Airflow DAGs folder (or a single DAG file)")
+    p.add_argument("--lambda", dest="lambda_template", metavar="TEMPLATE", help="serverless.yml or SAM/CloudFormation template")
+    p.add_argument("--js", help="Path to a JavaScript/TypeScript code repo to scan")
+    p.add_argument("--datahub", metavar="URL", help="Live DataHub server URL (GraphQL); token from --datahub-token or $DATAHUB_TOKEN")
+    p.add_argument("--datahub-token", default=None)
+    p.add_argument("--datahub-query", default="*", help="DataHub search query for datasets (default: *)")
+    p.add_argument("--no-alias-linking", action="store_true", help="Do not link table names at different qualification (schema.t vs db.schema.t)")
     p.add_argument("--no-column-lineage", action="store_true", help="Skip column-level SQL lineage")
     p.add_argument("-o", "--output", default=DEFAULT_GRAPH, help="Output graph JSON path")
 
@@ -68,6 +79,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_build = sub.add_parser("build", help="Build the unified graph from artifacts")
     _add_build_args(p_build)
     p_build.add_argument("--update", action="store_true", help="Skip the build if inputs are unchanged")
+    p_build.add_argument("--llm-fallback", action="store_true",
+                         help="After building, ask Claude for relationships the parsers could not derive (tagged llm; needs [ai])")
+    p_build.add_argument("--llm-model", default="claude-opus-5")
+    p_build.add_argument("--llm-min-confidence", type=float, default=0.6)
+
+    p_enrich = sub.add_parser("enrich", help="Add LLM-suggested relationships (llm provenance) to an existing graph")
+    p_enrich.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_enrich.add_argument("--unparsed", default=None, help="JSON file of unparsed SQL snippets (default: <graph>.unparsed.json if present)")
+    p_enrich.add_argument("--model", default="claude-opus-5")
+    p_enrich.add_argument("--min-confidence", type=float, default=0.6)
+    p_enrich.add_argument("--dry-run", action="store_true", help="Print suggestions, do not modify the graph")
+    p_enrich.add_argument("--json", action="store_true")
 
     p_impact = sub.add_parser("impact", help="Blast radius of one or more nodes")
     p_impact.add_argument("nodes", nargs="+", help="Node ids, names, or paths")
@@ -106,12 +129,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_exp.add_argument("--format", choices=["graphml", "dot", "cypher", "json"], default="graphml")
     p_exp.add_argument("-o", "--output", required=True)
 
-    p_html = sub.add_parser("html", help="Interactive HTML view of a blast radius")
-    p_html.add_argument("nodes", nargs="+")
+    p_html = sub.add_parser("html", help="Interactive HTML view: blast radius of nodes, or --all for the whole graph")
+    p_html.add_argument("nodes", nargs="*")
+    p_html.add_argument("--all", action="store_true", help="Render the whole graph instead of a blast radius")
+    p_html.add_argument("--with-columns", action="store_true", help="Include column nodes in --all view")
     p_html.add_argument("--graph", default=DEFAULT_GRAPH)
     p_html.add_argument("--max-depth", type=int, default=None)
     p_html.add_argument("--no-inferred", action="store_true")
     p_html.add_argument("-o", "--output", default="impact.html")
+
+    p_rel = sub.add_parser("relationships", help="All table and column relationships (foreign keys, lineage) — for data analysis")
+    p_rel.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_rel.add_argument("--search", default=None, help="Only tables whose name contains this text")
+    p_rel.add_argument("--tables-only", action="store_true", help="Skip column-level relationships")
+    p_rel.add_argument("--json", action="store_true")
+
+    p_lin = sub.add_parser("lineage", help="Upstream (where it comes from) and downstream (what it feeds) of a node")
+    p_lin.add_argument("node")
+    p_lin.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_lin.add_argument("--upstream-depth", type=int, default=None)
+    p_lin.add_argument("--downstream-depth", type=int, default=None)
+    p_lin.add_argument("--no-inferred", action="store_true")
+    p_lin.add_argument("--json", action="store_true")
+    p_lin.add_argument("--html", metavar="OUT", help="Also write an interactive lineage view")
 
     p_watch = sub.add_parser("watch", help="Rebuild the graph whenever inputs change")
     _add_build_args(p_watch)
@@ -153,9 +193,12 @@ def _dispatch(args: argparse.Namespace) -> int:
         "graph-diff": _cmd_graph_diff,
         "export": _cmd_export,
         "html": _cmd_html,
+        "lineage": _cmd_lineage,
+        "relationships": _cmd_relationships,
         "watch": _cmd_watch,
         "hook-install": _cmd_hook_install,
         "explain": _cmd_explain,
+        "enrich": _cmd_enrich,
         "mcp": _cmd_mcp,
     }[args.command](args)
 
@@ -171,25 +214,33 @@ def _load_graph(path: str) -> ImpactGraph:
 
 
 def _build_inputs(args: argparse.Namespace) -> List[Optional[str]]:
-    return [args.repo, args.dbt_manifest, args.sql, args.openlineage, args.lineage_file]
+    return [args.repo, args.dbt_manifest, args.sql, args.openlineage, args.lineage_file,
+            getattr(args, "airflow", None), getattr(args, "lambda_template", None), getattr(args, "js", None)]
+
+
+_UNPARSED: List[dict] = []  # filled by _build_graph; saved next to the graph for the LLM fallback
 
 
 def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
     graph = ImpactGraph()
+    _UNPARSED.clear()
     if args.repo:
         fragment = PythonExtractor(args.repo).extract()
         log(f"python: {len(fragment)} nodes from {args.repo}")
         graph.merge(fragment)
     if args.dbt_manifest:
-        fragment = DbtExtractor(
-            args.dbt_manifest, column_lineage=not args.no_column_lineage, dialect=args.sql_dialect
-        ).extract()
+        ext = DbtExtractor(args.dbt_manifest, column_lineage=not args.no_column_lineage, dialect=args.sql_dialect,
+                           catalog_path=getattr(args, "dbt_catalog", None))
+        fragment = ext.extract()
+        _UNPARSED.extend(ext.unparsed)
         log(f"dbt: {len(fragment)} nodes from {args.dbt_manifest}")
         graph.merge(fragment)
     if args.sql:
         from .extractors.sql_extractor import SqlExtractor
 
-        fragment = SqlExtractor(args.sql, dialect=args.sql_dialect).extract()
+        ext = SqlExtractor(args.sql, dialect=args.sql_dialect)
+        fragment = ext.extract()
+        _UNPARSED.extend(ext.unparsed)
         log(f"sql: {len(fragment)} nodes from {args.sql}")
         graph.merge(fragment)
     if args.openlineage:
@@ -200,13 +251,54 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
         fragment = LineageFileExtractor(args.lineage_file).extract()
         log(f"lineage-file: {len(fragment)} nodes from {args.lineage_file}")
         graph.merge(fragment)
+    if getattr(args, "warehouse", None):
+        from .extractors import WarehouseExtractor
+
+        schemas = [s.strip() for s in args.warehouse_schemas.split(",")] if args.warehouse_schemas else None
+        fragment = WarehouseExtractor(
+            args.warehouse, database=args.warehouse_database, schemas=schemas, dialect=args.sql_dialect
+        ).extract()
+        log(f"warehouse: {len(fragment)} nodes from {args.warehouse}")
+        graph.merge(fragment)
+    if getattr(args, "airflow", None):
+        from .extractors import AirflowExtractor
+
+        fragment = AirflowExtractor(args.airflow).extract()
+        log(f"airflow: {len(fragment)} nodes from {args.airflow}")
+        graph.merge(fragment)
+    if getattr(args, "lambda_template", None):
+        from .extractors import LambdaExtractor
+
+        fragment = LambdaExtractor(args.lambda_template, code_root=args.repo or None).extract()
+        log(f"lambda: {len(fragment)} nodes from {args.lambda_template}")
+        graph.merge(fragment)
+    if getattr(args, "js", None):
+        from .extractors import JsExtractor
+
+        fragment = JsExtractor(args.js).extract()
+        log(f"js/ts: {len(fragment)} nodes from {args.js}")
+        graph.merge(fragment)
+    if getattr(args, "datahub", None):
+        import os
+
+        from .extractors import DataHubExtractor
+
+        token = args.datahub_token or os.environ.get("DATAHUB_TOKEN")
+        fragment = DataHubExtractor(args.datahub, token=token, query=args.datahub_query).extract()
+        log(f"datahub: {len(fragment)} nodes from {args.datahub}")
+        graph.merge(fragment)
+    if not getattr(args, "no_alias_linking", False):
+        linked = graph.link_table_aliases()
+        if linked:
+            log(f"linked {linked} table alias pair(s) (schema.table <-> db.schema.table)")
     return graph
 
 
 def _require_inputs(args: argparse.Namespace) -> bool:
-    if not any(_build_inputs(args)):
+    if not any(_build_inputs(args)) and not getattr(args, "warehouse", None) and not getattr(args, "datahub", None):
         print(
-            "error: provide at least one of --repo, --dbt-manifest, --sql, --openlineage, --lineage-file",
+            "error: provide at least one of --repo, --dbt-manifest, --sql, --openlineage, --lineage-file, "
+            "--warehouse, --airflow, --lambda, --js, --datahub",
             file=sys.stderr,
         )
         return False
@@ -238,9 +330,44 @@ def _cmd_build(args: argparse.Namespace) -> int:
         print(f"{args.output} is up to date (inputs unchanged)")
         return 0
     graph = _build_graph(args)
+    unparsed_path = Path(str(args.output) + ".unparsed.json")
+    if _UNPARSED:
+        unparsed_path.write_text(json.dumps(_UNPARSED, indent=2), encoding="utf-8")
+        print(f"note: {len(_UNPARSED)} SQL snippet(s) could not be parsed -> {unparsed_path} "
+              f"(run 'impactgraph enrich' or build with --llm-fallback to let Claude suggest their lineage)")
+    elif unparsed_path.exists():
+        unparsed_path.unlink()
+    if args.llm_fallback:
+        from .ai import apply_suggestions, suggest_lineage
+
+        suggestions = suggest_lineage(graph, unparsed_sql=_UNPARSED, model=args.llm_model)
+        added = apply_suggestions(graph, suggestions, min_confidence=args.llm_min_confidence)
+        print(f"llm fallback: {len(suggestions)} suggestion(s), {added} edge(s) added (provenance=llm)")
     graph.save(args.output)
     maintenance.write_cache(args.output, inputs)
     print(f"unified graph: {len(graph)} nodes, {len(graph.edges())} edges -> {args.output}")
+    return 0
+
+
+def _cmd_enrich(args: argparse.Namespace) -> int:
+    from .ai import apply_suggestions, suggest_lineage
+
+    graph = _load_graph(args.graph)
+    unparsed_file = Path(args.unparsed) if args.unparsed else Path(str(args.graph) + ".unparsed.json")
+    unparsed = json.loads(unparsed_file.read_text(encoding="utf-8")) if unparsed_file.exists() else []
+    suggestions = suggest_lineage(graph, unparsed_sql=unparsed, model=args.model)
+    if args.json:
+        print(json.dumps(suggestions, indent=2))
+    else:
+        for s in suggestions:
+            mark = "+" if s["confidence"] >= args.min_confidence else "-"
+            print(f"  {mark} [{s['kind']}] {s['source']} -> {s['target']}  ({s['confidence']:.2f}) {s['reason']}")
+    if args.dry_run:
+        print(f"{len(suggestions)} suggestion(s); dry run, graph unchanged")
+        return 0
+    added = apply_suggestions(graph, suggestions, min_confidence=args.min_confidence)
+    graph.save(args.graph)
+    print(f"added {added} llm-provenance edge(s) to {args.graph} (use --no-inferred to exclude them)")
     return 0
 
 
@@ -359,15 +486,79 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_html(args: argparse.Namespace) -> int:
-    from .html_report import render_html
+    from .html_report import render_graph_html, render_html
 
     graph = _load_graph(args.graph)
+    if args.all:
+        Path(args.output).write_text(render_graph_html(graph, hide_columns=not args.with_columns), encoding="utf-8")
+        print(f"html view (whole graph) -> {args.output}")
+        return 0
+    if not args.nodes:
+        print("error: give node ids, or --all for the whole graph", file=sys.stderr)
+        return 2
     analysis = analyze_impact(graph, args.nodes, max_depth=args.max_depth, include_inferred=not args.no_inferred)
     if not analysis.changed:
         print("no matching nodes found", file=sys.stderr)
         return 2
     Path(args.output).write_text(render_html(graph, analysis), encoding="utf-8")
     print(f"html view -> {args.output}")
+    return 0
+
+
+def _cmd_relationships(args: argparse.Namespace) -> int:
+    from .analysis.relationships import relationships
+
+    graph = _load_graph(args.graph)
+    rel = relationships(graph, search=args.search, include_columns=not args.tables_only)
+    if args.json:
+        print(json.dumps(rel, indent=2, sort_keys=True))
+        return 0
+    if not rel["tables"]:
+        print("no tables/views in the graph (build with --warehouse, --dbt-manifest, --sql or --openlineage)")
+        return 0
+    for t in rel["tables"]:
+        cols = ", ".join(c["name"] + ("*" if c.get("primary_key") else "") for c in t["columns"]) or "-"
+        print(f"{t['id']}  ({t['type']})")
+        print(f"    columns: {cols}")
+        for d in t["depends_on"]:
+            print(f"    -> depends on {d['target']}  [{d['via']}]")
+        for d in t["dependents"]:
+            print(f"    <- feeds {d['source']}  [{d['via']}]")
+    if rel["column_relationships"]:
+        print("\ncolumn relationships:")
+        for r in rel["column_relationships"]:
+            print(f"    {r['from']}  ->  {r['to']}  [{r['via']}]")
+    print(f"\n{len(rel['tables'])} tables/views, {len(rel['table_relationships'])} table relationships, "
+          f"{len(rel['column_relationships'])} column relationships  (* = primary key)")
+    return 0
+
+
+def _cmd_lineage(args: argparse.Namespace) -> int:
+    graph = _load_graph(args.graph)
+    node = graph.resolve(args.node)
+    if node is None:
+        matches = graph.find(args.node)
+        print(f"'{args.node}' not found" + (f"; candidates: {', '.join(m.id for m in matches[:8])}" if matches else ""), file=sys.stderr)
+        return 2
+    include_inferred = not args.no_inferred
+    if args.html:
+        from .html_report import render_lineage_html
+
+        Path(args.html).write_text(
+            render_lineage_html(graph, node.id, args.upstream_depth, args.downstream_depth, include_inferred),
+            encoding="utf-8",
+        )
+        print(f"lineage view -> {args.html}", file=sys.stderr)
+    if args.json:
+        lin = graph.lineage(node.id, args.upstream_depth, args.downstream_depth, include_inferred)
+        print(json.dumps({"node": node.id, **lin,
+                          "upstream_tree": graph.upstream_tree(node.id, args.upstream_depth, include_inferred),
+                          "downstream_tree": graph.impact_tree(node.id, args.downstream_depth, include_inferred)},
+                         indent=2, sort_keys=True))
+    else:
+        from .report import render_lineage
+
+        render_lineage(graph, node.id, args.upstream_depth, args.downstream_depth, include_inferred)
     return 0
 
 

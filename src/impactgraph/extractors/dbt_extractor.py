@@ -35,10 +35,21 @@ _EXPOSURE_TYPES = {
 class DbtExtractor(Extractor):
     name = "dbt"
 
-    def __init__(self, manifest_path: Union[str, Path], column_lineage: bool = True, dialect: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        manifest_path: Union[str, Path],
+        column_lineage: bool = True,
+        dialect: Optional[str] = None,
+        catalog_path: Optional[Union[str, Path]] = None,
+    ) -> None:
         self.manifest_path = Path(manifest_path)
         self.column_lineage = column_lineage
         self.dialect = dialect
+        # dbt's catalog.json (from `dbt docs generate`): real columns per relation,
+        # used to expand `select *` in compiled SQL. Auto-detected next to the manifest.
+        cp = Path(catalog_path) if catalog_path else self.manifest_path.with_name("catalog.json")
+        self.catalog_path = cp if cp.exists() else None
+        self.unparsed: list = []  # compiled SQL that sqlglot could not parse (LLM fallback candidates)
 
     def extract(self) -> ImpactGraph:
         graph = ImpactGraph()
@@ -171,12 +182,47 @@ class DbtExtractor(Extractor):
             self._add_column_lineage(graph, manifest, unique_to_graph_id, relation_to_node, dialect)
         return graph
 
+    def _schema_mapping(self, manifest) -> dict:
+        """{database: {schema: {relation: {column: type}}}} from catalog.json + manifest columns."""
+        schema: dict = {}
+
+        def put(database, sch, name, columns: dict) -> None:
+            if not (sch and name and columns):
+                return
+            schema.setdefault(str(database or ""), {}).setdefault(str(sch), {}).setdefault(str(name), {}).update(columns)
+            if database:  # also allow schema.table lookups
+                schema.setdefault("", {}).setdefault(str(sch), {}).setdefault(str(name), {}).update(columns)
+
+        catalog = {}
+        if self.catalog_path:
+            try:
+                catalog = json.loads(self.catalog_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                catalog = {}
+        for section in ("nodes", "sources"):
+            for uid, entry in (catalog.get(section) or {}).items():
+                md = entry.get("metadata") or {}
+                cols = {c: (v.get("type") or "UNKNOWN") for c, v in (entry.get("columns") or {}).items()}
+                put(md.get("database"), md.get("schema"), md.get("name"), cols)
+        for uid, node in manifest.get("nodes", {}).items():
+            if node.get("resource_type") in _RESOURCE_NODE_TYPES:
+                cols = {c: "UNKNOWN" for c in (node.get("columns") or {})}
+                put(node.get("database"), node.get("schema"), node.get("alias") or node.get("name"), cols)
+        for uid, src in manifest.get("sources", {}).items():
+            cols = {c: "UNKNOWN" for c in (src.get("columns") or {})}
+            put(src.get("database"), src.get("schema"), src.get("identifier") or src.get("name"), cols)
+        # drop the empty-database level if nothing used it, keep sqlglot happy
+        if "" in schema and not schema[""]:
+            del schema[""]
+        return schema
+
     def _add_column_lineage(self, graph, manifest, unique_to_graph_id, relation_to_node, dialect) -> None:
         try:
             import sqlglot
             from .sql_extractor import add_column_lineage
         except ImportError:
             return
+        schema = self._schema_mapping(manifest)
 
         def resolve_relation(name_lower: str):
             hit = relation_to_node.get(name_lower)
@@ -199,11 +245,16 @@ class DbtExtractor(Extractor):
                 continue
             try:
                 query = sqlglot.parse_one(sql, read=dialect)
-            except Exception:
+            except Exception as e:
+                self.unparsed.append({"where": f"dbt model {node.get('name', gid)}", "sql": sql, "error": str(e)[:200]})
                 continue
             if query is None:
                 continue
-            add_column_lineage(graph, gid, node.get("name", gid), query, dialect, resolve_relation=resolve_relation)
+            try:
+                add_column_lineage(graph, gid, node.get("name", gid), query, dialect,
+                                   resolve_relation=resolve_relation, schema=schema or None)
+            except Exception as e:
+                self.unparsed.append({"where": f"dbt model {node.get('name', gid)}", "sql": sql, "error": str(e)[:200]})
 
 
 def _owner_of(node: dict) -> Optional[str]:

@@ -6,7 +6,7 @@ lineage files, warehouse information_schema), then ask:
 "if I change this, what can break?"
 """
 
-from .graph import EXTRACTED, INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType, diff_graphs
+from .graph import EXTRACTED, INFERRED, LLM, Edge, EdgeType, ImpactGraph, Node, NodeType, diff_graphs
 from .analysis import ImpactAnalysis, analyze_impact
 from .extractors import (
     DbtExtractor,
@@ -15,11 +15,15 @@ from .extractors import (
     PythonExtractor,
     SqlExtractor,
     WarehouseExtractor,
+    AirflowExtractor,
+    LambdaExtractor,
+    JsExtractor,
+    DataHubExtractor,
     changed_node_ids,
     collect_changes,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Edge",
@@ -29,6 +33,7 @@ __all__ = [
     "NodeType",
     "EXTRACTED",
     "INFERRED",
+    "LLM",
     "diff_graphs",
     "ImpactAnalysis",
     "analyze_impact",
@@ -38,6 +43,10 @@ __all__ = [
     "OpenLineageExtractor",
     "LineageFileExtractor",
     "WarehouseExtractor",
+    "AirflowExtractor",
+    "LambdaExtractor",
+    "JsExtractor",
+    "DataHubExtractor",
     "changed_node_ids",
     "collect_changes",
     "__version__",

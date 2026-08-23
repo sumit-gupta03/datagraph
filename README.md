@@ -2,83 +2,97 @@
 
 **AI-powered Change Impact Graph for data and code systems.**
 
-Answer the question every data platform engineer asks before merging:
+Answer the two questions every data / platform engineer asks:
 
 > *"If I change this file, function, dbt model, SQL column, or table — what can break?"*
+> *"Where does this table / column come from, and what does it feed?"*
 
-Projects like Graphify / Code-Graph-RAG build graphs from source code, and DataHub / OpenLineage focus on data lineage. `impactgraph` connects both worlds into a **single unified graph**:
+Projects like Graphify / Code-Graph-RAG build graphs from source code; DataHub and OpenLineage focus on data lineage. `impactgraph` connects both worlds into **one unified graph** and answers from it in seconds, locally:
 
 ```
-Git Change → Python Function → API → Table → dbt Model → Report / Dashboard
+Git Change → Python/JS Function → Lambda → API → Table → dbt Model → Report / Dashboard
+                     Airflow task ──┘            ▲
+           warehouse foreign keys / views ───────┘
 ```
+
+<p align="center">
+  <img src="docs/images/lineage-jaffle-customers.png" alt="Lineage of the customers model in dbt's jaffle_shop project" width="900"><br>
+  <em>impactgraph lineage customers --html — upstream (left) through staging models to seed files, downstream (right) to the table and its columns. Real output on dbt's public jaffle_shop project.</em>
+</p>
 
 ## The key idea
 
-**The graph is never built by an LLM.** It is constructed deterministically from real engineering artifacts:
+**The graph is never built by an LLM.** It is constructed deterministically from real engineering artifacts; graph algorithms compute blast radius, lineage, risk, owners and a test plan; an LLM may only *explain* the result — or, as a clearly-labelled **fallback**, *suggest* relationships the parsers could not derive (tagged `llm`, excludable).
 
-| Artifact | Extractor | What it contributes |
+| Artifact | Flag | What it contributes |
 |---|---|---|
-| Python source | `ast` | files, functions, classes, imports, call edges (calls are tagged *inferred*) |
-| dbt project | `manifest.json` | models, sources, seeds, exposures, the resolved DAG, materialized tables, columns, **owners**, and — from `compiled_code` — **column-to-column lineage** |
-| Raw SQL | `sqlglot` | table/view lineage **and column-level lineage** (through aliases, CTEs and renames) |
-| Git | `git diff` | which files *and which functions* actually changed |
-| OpenLineage events | JSON / NDJSON | datasets, jobs, schema and `columnLineage` facets, ownership — lineage Airflow / Marquez / DataHub already observed |
-| DataHub lineage file | YAML / JSON | curated dataset lineage + fine-grained (column) lineage |
-| Warehouse `information_schema` | any DB-API connection | real tables, columns (with types) and view lineage; diff two snapshots for schema drift |
+| Python source | `--repo` | files, functions, classes, imports, calls (*inferred*), and **SQL found inside the code → table edges** (the automatic code↔data bridge) |
+| JavaScript / TypeScript | `--js` | files, functions, imports, calls, SQL-in-code |
+| dbt project | `--dbt-manifest` (+ `--dbt-catalog`) | models, sources, seeds, exposures, the DAG, materialized tables, columns, **owners**, and **column-to-column lineage** from `compiled_code` (expands `select *` using `catalog.json`) |
+| Raw SQL | `--sql` | table/view lineage **and column lineage** (aliases, CTEs, renames) via sqlglot |
+| Warehouse / database | `--warehouse DSN` | real tables, columns + types, **foreign keys** (table↔table and column↔column), view lineage — from `information_schema`, or a **SQLite** file for zero-setup |
+| Git | `diff` | which files *and which functions* changed right now |
+| Airflow DAGs | `--airflow` | DAGs, tasks, task dependencies (`>>`, lists, `chain`), `python_callable` links, SQL in operators → tables |
+| AWS Lambda | `--lambda` | serverless.yml / SAM / CloudFormation: lambdas → handler functions, HTTP APIs, S3/SQS/DynamoDB event sources and env-referenced tables |
+| OpenLineage events | `--openlineage` | datasets, jobs, schema + `columnLineage` facets, ownership (what Airflow / Marquez / DataHub already observed) |
+| DataHub | `--lineage-file`, `--datahub URL` | curated lineage files, or a **live GraphQL import** of datasets, owners, upstream and fine-grained (column) lineage |
 
-Graph algorithms compute the blast radius, a deterministic risk score, owners to notify, and a test plan. The AI layer (optional) only **explains** the already-computed analysis — so you get LLM readability with graph-level trust.
+Table names at different qualification (`analytics.fact_booking` in code vs `prod.analytics.fact_booking` in dbt) are linked automatically.
 
 ## Install
 
 ```bash
-pip install impactgraph            # core (Python + dbt + git + OpenLineage + lineage-file + warehouse)
-pip install impactgraph[sql]       # + SQL / column lineage via sqlglot
-pip install impactgraph[ai]        # + AI explanations via the Claude API
+pip install impactgraph            # core (all extractors; sqlglot needed for SQL/column lineage)
+pip install impactgraph[sql]       # + sqlglot
+pip install impactgraph[ai]        # + Claude explanations and LLM lineage fallback
 pip install impactgraph[mcp]       # + MCP server for Claude Code / Cursor / Codex
-pip install impactgraph[all]       # everything (also PyYAML for YAML lineage files)
+pip install impactgraph[all]       # everything (also PyYAML for YAML lineage files / serverless.yml)
 ```
 
-## Quick start (CLI)
+## Quick start
 
 ```bash
-# 1. Build the unified graph from whatever artifacts you have
-impactgraph build --repo ./src --dbt-manifest target/manifest.json --sql ./sql \
-                  --openlineage events.ndjson --lineage-file lineage.yml -o impactgraph.json
+# 1. Build the graph from whatever you have (any combination)
+impactgraph build --repo ./src --dbt-manifest target/manifest.json --dbt-catalog target/catalog.json \
+                  --sql ./sql --airflow ./dags --lambda template.yaml --js ./web \
+                  --openlineage events.ndjson --warehouse "snowflake://..." -o impactgraph.json
 
-# 2. What breaks if I change this dbt model / table / column / function?
-impactgraph impact dbt:customer
-impactgraph impact column:dim_customer.customer_key
+# 2. Impact — what breaks?
+impactgraph impact dbt:customer                         # a model / table / column / function / task
+impactgraph diff --repo . --graph impactgraph.json      # my current uncommitted change  ← the CI command
 
-# 3. What breaks given my current (uncommitted) git diff?  — the CI command
-impactgraph diff --repo . --graph impactgraph.json
+# 3. Lineage & relationships — where does it come from, what does it feed, how are tables related?
+impactgraph lineage table:prod.analytics.dim_customer   # upstream + downstream trees (--html for a picture)
+impactgraph relationships                               # every table: columns, foreign keys, lineage (--json)
+impactgraph paths dbt:customer exposure:revenue_report  # every propagation path
+impactgraph hotspots                                    # where a change hurts most
 
-# 4. Explore
-impactgraph nodes --search customer --type dbt_model
-impactgraph paths dbt:customer exposure:revenue_report
-impactgraph hotspots --top 10                    # where a change hurts most
-impactgraph html dbt:customer -o impact.html     # interactive blast-radius view
-impactgraph export --format graphml -o g.graphml # also dot | cypher | json
-impactgraph graph-diff old.json new.json         # schema / dependency drift
+# 4. Pictures
+impactgraph html dbt:customer -o impact.html            # interactive blast radius
+impactgraph lineage customers --html lineage.html       # interactive lineage
+impactgraph html --all -o graph.html                    # the whole graph (--with-columns for columns)
+impactgraph export --format graphml -o g.graphml        # also dot | cypher | json
 
-# 5. Keep it fresh
-impactgraph build ... --update                   # skips when inputs unchanged
-impactgraph watch --repo ./src --dbt-manifest target/manifest.json
-impactgraph hook-install --git-repo . --repo ./src --dbt-manifest target/manifest.json
+# 5. Keep it fresh / extend
+impactgraph build ... --update                          # skip when inputs unchanged
+impactgraph watch ... ;  impactgraph hook-install --git-repo . ...
+impactgraph graph-diff old.json new.json                # schema / dependency drift
+impactgraph enrich --dry-run                            # LLM suggestions for SQL the parsers could not read (needs [ai])
 
-# 6. AI explanation / AI assistants
-impactgraph explain dbt:customer                 # needs [ai] + ANTHROPIC_API_KEY
-impactgraph mcp --graph impactgraph.json         # MCP server (stdio), needs [mcp]
+# 6. AI
+impactgraph explain dbt:customer                        # plain-language explanation (needs [ai])
+impactgraph mcp --graph impactgraph.json                # MCP server for coding assistants (needs [mcp])
 ```
 
-Example output:
+<p align="center">
+  <img src="docs/images/impact-demo.png" alt="Interactive blast-radius view" width="900"><br>
+  <em>impactgraph html models/customer.sql — change in one SQL file → models → tables → dashboards and the Python API, with risk, owners to notify and the test plan.</em>
+</p>
+
+Terminal output of `impactgraph impact`:
 
 ```
-⚠ Change Impact
-
-Changed:
-  customer
-
-Risk: HIGH  (score 24.5)
+⚠ Change Impact                     Changed: customer      Risk: HIGH (score 24.5)
 
 ⬢ customer (dbt_model)
 ├── ⬢ dim_customer (dbt_model) via depends_on
@@ -87,70 +101,47 @@ Risk: HIGH  (score 24.5)
 │       └── 📊 customer_dashboard (dashboard) via exposes
 └── ▤ prod.analytics.customer (view) via writes_to
 
-Affected:
-  3 dbt model(s)
-  2 dashboard(s)
-  2 table(s)
-
-Notify (owners of affected artifacts):
-  finance: revenue_report
-  growth: customer_dashboard
-
+Affected: 3 dbt model(s) · 2 dashboard(s) · 2 table(s)
+Notify (owners of affected artifacts):  finance: revenue_report · growth: customer_dashboard
 Recommended tests:
   ✓ dbt build --select customer+ dim_customer+ fact_booking+
   ✓ Run a schema/contract check on prod.analytics.fact_booking
   ✓ Manually validate 'revenue_report' after deploy (numbers & filters)
 ```
 
-Add `--json` for machine output, `--no-inferred` to keep only artifact-backed edges, `--html out.html` for the interactive view.
+`--json` for machines · `--no-inferred` to keep only artifact-backed edges (drops name-resolved calls, same-name column guesses and `llm` suggestions) · `--html out.html` for the picture.
 
-## Quick start (Python API)
+## Python API
 
 ```python
-from impactgraph import ImpactGraph, PythonExtractor, DbtExtractor, analyze_impact
+from impactgraph import (ImpactGraph, PythonExtractor, DbtExtractor, WarehouseExtractor,
+                         AirflowExtractor, LambdaExtractor, JsExtractor, OpenLineageExtractor,
+                         LineageFileExtractor, DataHubExtractor, analyze_impact)
 
 graph = ImpactGraph()
 graph.merge(PythonExtractor("./src").extract())
-graph.merge(DbtExtractor("target/manifest.json").extract())
+graph.merge(DbtExtractor("target/manifest.json", catalog_path="target/catalog.json").extract())
+graph.merge(WarehouseExtractor("warehouse.db").extract())        # or any DB-API connection / SQLAlchemy URL
+graph.merge(AirflowExtractor("./dags").extract())
+graph.link_table_aliases()
 
 analysis = analyze_impact(graph, ["dbt:customer"])
-print(analysis.risk)               # {'score': 24.5, 'level': 'HIGH'}
-print(analysis.affected)           # {node_id: depth, ...}
-print(analysis.owners)             # {'finance': ['revenue_report'], ...}
-print(analysis.recommended_tests)
+print(analysis.risk, analysis.owners, analysis.recommended_tests)
 
-# More extractors
-from impactgraph import OpenLineageExtractor, LineageFileExtractor, WarehouseExtractor, SqlExtractor
-graph.merge(OpenLineageExtractor("events.ndjson").extract())
-graph.merge(LineageFileExtractor("lineage.yml").extract())
-graph.merge(WarehouseExtractor(conn, database="PROD", schemas=["ANALYTICS"], dialect="snowflake").extract())
+print(graph.lineage("table:prod.analytics.dim_customer"))       # {'upstream': {...}, 'downstream': {...}}
+from impactgraph.analysis.relationships import relationships
+print(relationships(graph)["table_relationships"])              # foreign keys + lineage between tables
 
-# Optional AI explanation (pip install impactgraph[ai])
-from impactgraph.ai import explain_impact
+# Optional AI (pip install impactgraph[ai])
+from impactgraph.ai import explain_impact, suggest_lineage, apply_suggestions
 print(explain_impact(analysis))
+apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged provenance=llm
 ```
-
-### Bridging code and data
-
-Extractors give you each world; one edge connects them:
-
-```python
-from impactgraph import Edge, EdgeType
-
-# "this API function reads the fact_booking table"
-graph.add_edge(Edge(
-    src="func:api/customers.py::customers_endpoint",
-    dst="table:prod.analytics.fact_booking",
-    type=EdgeType.DEPENDS_ON,
-))
-```
-
-Now a change to a dbt model propagates all the way into your Python API — and vice versa.
 
 ## Use it from AI coding assistants
 
-- **Claude Code skill:** copy `skills/impactgraph/` to `.claude/skills/impactgraph/` in your repo (or `~/.claude/skills/`). Then ask *"what breaks if I change dim_customer?"* or *"is this change safe to merge?"* — the skill runs `impactgraph diff` / `impact` and explains the JSON, marking inferred edges as heuristics.
-- **MCP server:** `impactgraph mcp --graph impactgraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots` over stdio. Register it in Claude Code / Cursor as an MCP server command.
+- **Claude Code skill:** copy `skills/impactgraph/` to `.claude/skills/impactgraph/` (or `~/.claude/skills/`). Ask *"what breaks if I change dim_customer?"*, *"where does fact_booking come from?"*, *"how are these tables related?"*.
+- **MCP server:** `impactgraph mcp --graph impactgraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`.
 
 ## GitHub Action — impact comment on every PR
 
@@ -162,68 +153,56 @@ Now a change to a dbt model propagates all the way into your Python API — and 
     fail-on: CRITICAL        # LOW | MEDIUM | HIGH | CRITICAL | NONE
 ```
 
-See `examples/github-workflow-impact.yml` and `action.yml`.
+See `examples/github-workflow-impact.yml` and `action.yml`. Tagging `vX.Y.Z` builds and creates a GitHub Release (`.github/workflows/publish.yml`); PyPI publishing switches on once the trusted publisher is configured (see the workflow header).
 
-## How impactgraph relates to Graphify and DataHub
+## How it compares: Graphify · DataHub · OpenLineage · impactgraph
 
-People reasonably ask "isn't this Graphify / DataHub?" — it overlaps with both and is neither. The short version: **Graphify** helps an AI assistant *understand* a repo; **DataHub** is the company-wide *catalog* of data assets and lineage; **impactgraph** is the *pre-merge check* that asks "is this specific change safe?" across code **and** data.
+| | Graphify | DataHub | OpenLineage | impactgraph |
+|---|---|---|---|---|
+| What it is | A skill that turns a folder into a knowledge graph for AI assistants | A deployed metadata platform / catalog | An open **standard + spec** for emitting lineage events (plus Marquez as a reference server) | A pip library + CLI + skill for pre-merge impact, lineage and schema relationships |
+| Question answered | "Help my AI assistant understand this repo" | "What data exists, who owns it, how is it connected, is it healthy?" | "What did this job read and write (at run time)?" | "If I change this, what breaks? Where does it come from? How are tables related?" |
+| Inputs | 13 languages via tree-sitter, docs, PDFs, images | 50+ connectors, OpenLineage events | Emitters in Airflow, Spark, dbt, Flink… | Python/JS AST, dbt manifest+catalog, SQL, warehouse information_schema (FKs), git diff, Airflow, Lambda, OpenLineage, DataHub |
+| Graph built by | AST + Claude for non-code | ingestion connectors | the emitting jobs | deterministic extractors; optional `llm` fallback clearly tagged |
+| Knows application code | yes (structure) | no | no | yes — functions, calls, SQL-in-code, Lambda handlers, Airflow callables |
+| Column-level lineage | no | yes (connectors) | yes (facet) | yes (sqlglot, catalog-aware; imports OL/DataHub column lineage) |
+| Foreign-key / schema relationships | no | yes | no | yes (`relationships`, FK edges, schema drift) |
+| Direction-aware impact + risk + test plan | no | impact view only | no | yes, across code and data |
+| Entry point | a folder | a dataset | a job run | a git diff (to the changed function), or any node |
+| Display | HTML graph, wiki | web UI | via a backend (Marquez/DataHub) | interactive HTML (impact / lineage / whole graph), terminal trees, GraphML/DOT/Cypher |
+| Infrastructure | none | platform (DB, search, Kafka) | events need a backend | none — pip, a JSON file, runs in CI; skill + MCP |
+| AI role | extracts concepts from docs/images | n/a | n/a | explains results; optional fallback suggestions tagged `llm` |
 
-| | Graphify | DataHub | impactgraph |
-|---|---|---|---|
-| Question answered | "Help my AI assistant understand this folder" | "What data exists, who owns it, how is it connected?" | "If I merge this change, what can break?" |
-| Inputs | 13 languages (tree-sitter), docs, PDFs, images | 50+ connectors, runtime OpenLineage events | Python AST, dbt manifest, SQL, git diff, OpenLineage, DataHub lineage files, warehouse information_schema |
-| Graph built by | AST + Claude (docs/images), edges tagged extracted/inferred | ingestion connectors | deterministic extractors only (no LLM in the graph); edges tagged extracted/inferred |
-| Knows about application code | yes (structure / calls) | no | yes (files, functions, imports, calls) |
-| Knows about data assets | SQL schemas as structure | yes — tables, columns, dashboards, quality, owners | dbt models, sources, tables, columns (with column-level lineage), exposures, owners |
-| Direction-aware impact propagation | no | yes (data plane only) | yes, across code **and** data |
-| Entry point | a folder | a table / dataset | a git diff (down to the changed function) |
-| Output | queryable graph, HTML viz, wiki, report | UI, lineage/impact explorer, search, governance | blast radius tree, risk level, owners, test plan, JSON, interactive HTML, GraphML/DOT/Cypher |
-| Infrastructure | none (local skill, MCP) | deployed platform (metadata service, DB, search, Kafka) | none (pip + a JSON file; runs in CI; skill + MCP) |
-| AI role | extracts concepts from non-code inputs | n/a | explains the computed analysis only |
+**Positioning:** OpenLineage is the *wire format* lineage travels in; DataHub is the *catalog* it lands in; Graphify is the *repo map* for an assistant; impactgraph is the *pre-merge check and lineage/relationship explorer* that also reads your code — and it **imports** OpenLineage events and DataHub lineage rather than competing with them. What it deliberately is not: a catalog (search, glossary, governance, quality monitoring).
 
-What impactgraph deliberately does **not** try to be: a catalog (search, glossary, governance policies, quality monitoring — use DataHub and import its lineage here), or a general code-understanding graph with docs/PDF/image ingestion (use Graphify).
-
-Known limits today (honest): Python is the only code language parsed; code↔data bridge edges are still declared by hand (auto-detection is the top roadmap item); column lineage needs SQL (compiled dbt code, SQL files, view definitions or OpenLineage facets) — without it a column change falls back to a same-name heuristic that is marked *inferred*.
+**Known limits:** code languages are Python and JS/TS (regex-based for JS); call edges are name-resolved (tagged *inferred*); column lineage needs SQL or a catalog — otherwise a same-name heuristic (tagged *inferred*) or the opt-in `llm` fallback applies.
 
 ## How impact propagation works
 
-Edges are semantic, and each type knows which way change flows:
-
-| Edge | Direction of impact |
-|---|---|
-| `contains` (file → function, model → column) | forward — changing a file affects its members |
-| `calls` (caller → callee) | reverse — changing the callee affects callers |
-| `imports` (importer → imported) | reverse |
-| `depends_on` (downstream → upstream; column → source column) | reverse — upstream change hits dependents |
-| `writes_to` (model → table, job → dataset) | forward |
-| `exposes` (model → dashboard) | forward |
-
-`graph.impact(node)` runs a BFS honoring those directions and returns every affected node with its propagation depth. Every edge carries a provenance — `extracted` (read from an artifact) or `inferred` (name-based call resolution, same-name column heuristic) — and `--no-inferred` excludes the latter. Risk is scored deterministically (dashboards and APIs weigh more than functions; direct hits weigh more than distant ones).
+Edges are semantic and each type knows which way change flows: `contains`, `writes_to`, `exposes` forward; `calls`, `imports`, `depends_on` reverse. `graph.impact(node)` is a BFS honouring those directions; `graph.upstream(node)` is the inverse; `graph.lineage(node)` is both. Every edge carries a provenance — `extracted`, `inferred` or `llm`.
 
 ## Node id conventions
 
 ```
-file:models/customer.sql        func:src/api.py::customers_endpoint
-class:src/models.py::Customer   dbt:dim_customer
-source:raw.customers            exposure:revenue_report
-table:prod.analytics.customer   column:dim_customer.customer_key   (column names lower-cased)
-job:airflow/load_dim_customer
+file:models/customer.sql       func:src/api.py::customers_endpoint    class:src/models.py::Customer
+dbt:dim_customer               source:raw.customers                   exposure:revenue_report
+table:prod.analytics.customer  column:dim_customer.customer_key       job:airflow/load_dim_customer
+dag:nightly_bookings           task:nightly_bookings/build_dim        lambda:GetBookings    api:GET /bookings
 ```
 
 ## Development
 
 ```bash
-git clone <repo> && cd impactgraph
+git clone https://github.com/sumit-gupta03/impactgraph && cd impactgraph
 pip install -e .[dev]
-pytest            # 70 tests, offline, ~4 s
+pytest            # 108 tests, offline, ~7 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
 ## Roadmap
 
-- Auto-detect code↔data bridge edges (SQL strings and warehouse-connector calls inside Python)
-- More code languages via tree-sitter (TypeScript/JavaScript, Java/Scala first)
-- Airflow DAG and AWS Lambda extractors; live DataHub GraphQL import
-- Publish the skill to skill directories and the package to PyPI
+- Tree-sitter based parsers for Java/Scala/Go (today: Python via ast, JS/TS via regex)
+- Airflow TaskFlow-decorated task bodies, Dagster/Prefect extractors
+- Incremental per-file rebuilds (today `--update` skips unchanged inputs)
+- PyPI release (workflow ready; needs the trusted publisher enabled)
 
 ## License
 

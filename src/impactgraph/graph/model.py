@@ -23,6 +23,7 @@ class NodeType(str, Enum):
     LAMBDA = "lambda"
     API = "api"
     DAG = "dag"
+    TASK = "task"
     REPORT = "report"
     DASHBOARD = "dashboard"
 
@@ -60,8 +61,10 @@ IMPACT_DIRECTION: Dict[EdgeType, str] = {
 }
 
 # Edge provenance values (stored in Edge.meta["provenance"]).
-EXTRACTED = "extracted"  # read directly from an artifact (manifest DAG, AST, SQL lineage)
+EXTRACTED = "extracted"  # read directly from an artifact (manifest DAG, AST, SQL lineage, FK)
 INFERRED = "inferred"    # heuristic (name-based call resolution, same-name column match)
+LLM = "llm"              # suggested by a model as a fallback when lineage could not be derived
+# Anything that is not EXTRACTED is excluded by ``include_inferred=False`` / ``--no-inferred``.
 
 
 @dataclass

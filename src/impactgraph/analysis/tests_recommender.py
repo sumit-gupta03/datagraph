@@ -43,6 +43,8 @@ def recommend_tests(graph: ImpactGraph, affected: Dict[str, int]) -> List[str]:
             add(f"Manually validate '{node.name}' after deploy (numbers & filters)")
         elif node.type == NodeType.DAG:
             add(f"Trigger a test run of DAG '{node.name}' in a non-prod environment")
+        elif node.type == NodeType.TASK:
+            add(f"Run task '{node.name}' of DAG '{node.meta.get('dag', '?')}' against a non-prod target")
 
     if dbt_models:
         shown = " ".join(f"{m}+" for m in sorted(set(dbt_models))[:5])

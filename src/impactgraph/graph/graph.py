@@ -126,16 +126,97 @@ class ImpactGraph:
         """Nodes affected when ``node_id`` changes, honoring per-type direction."""
         for _, dst, data in self._g.out_edges(node_id, data=True):
             edge: Edge = data["edge"]
-            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+            if not include_inferred and edge.meta.get("provenance", EXTRACTED) != EXTRACTED:
                 continue
             if IMPACT_DIRECTION[edge.type] == "forward":
                 yield dst, edge
         for src, _, data in self._g.in_edges(node_id, data=True):
             edge = data["edge"]
-            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+            if not include_inferred and edge.meta.get("provenance", EXTRACTED) != EXTRACTED:
                 continue
             if IMPACT_DIRECTION[edge.type] == "reverse":
                 yield src, edge
+
+    def _upstream_neighbors(
+        self, node_id: str, include_inferred: bool = True
+    ) -> Iterable[Tuple[str, Edge]]:
+        """Nodes that ``node_id`` depends on — the exact inverse of _affected_neighbors."""
+        for _, dst, data in self._g.out_edges(node_id, data=True):
+            edge: Edge = data["edge"]
+            if not include_inferred and edge.meta.get("provenance", EXTRACTED) != EXTRACTED:
+                continue
+            if IMPACT_DIRECTION[edge.type] == "reverse":
+                yield dst, edge
+        for src, _, data in self._g.in_edges(node_id, data=True):
+            edge = data["edge"]
+            if not include_inferred and edge.meta.get("provenance", EXTRACTED) != EXTRACTED:
+                continue
+            if IMPACT_DIRECTION[edge.type] == "forward":
+                yield src, edge
+
+    def upstream(
+        self, node: str, max_depth: Optional[int] = None, include_inferred: bool = True
+    ) -> Dict[str, int]:
+        """Where a node comes from: everything it (transitively) depends on, id -> depth."""
+        if node not in self._g:
+            return {}
+        depths: Dict[str, int] = {}
+        seen: Set[str] = {node}
+        frontier: Dict[str, int] = {node: 0}
+        while frontier:
+            nxt: Dict[str, int] = {}
+            for nid, d in frontier.items():
+                nd = d + 1
+                if max_depth is not None and nd > max_depth:
+                    continue
+                for up, _edge in self._upstream_neighbors(nid, include_inferred):
+                    if up not in seen:
+                        seen.add(up)
+                        depths[up] = nd
+                        nxt[up] = nd
+            frontier = nxt
+        return depths
+
+    def lineage(
+        self,
+        node: str,
+        upstream_depth: Optional[int] = None,
+        downstream_depth: Optional[int] = None,
+        include_inferred: bool = True,
+    ) -> Dict[str, Dict[str, int]]:
+        """Both directions at once: {'upstream': {...}, 'downstream': {...}}."""
+        return {
+            "upstream": self.upstream(node, max_depth=upstream_depth, include_inferred=include_inferred),
+            "downstream": self.impact(node, max_depth=downstream_depth, include_inferred=include_inferred),
+        }
+
+    def upstream_tree(
+        self, node: str, max_depth: Optional[int] = None, include_inferred: bool = True
+    ) -> Dict:
+        """Nested dict tree of what a node depends on (for rendering)."""
+        seen: Set[str] = {node}
+
+        def build(nid: str, depth: int) -> Dict:
+            n = self.get_node(nid)
+            entry: Dict = {
+                "id": nid,
+                "name": n.name if n else nid,
+                "type": n.type.value if n else "unknown",
+                "children": [],
+            }
+            if max_depth is not None and depth >= max_depth:
+                return entry
+            for up, edge in self._upstream_neighbors(nid, include_inferred):
+                if up in seen:
+                    continue
+                seen.add(up)
+                child = build(up, depth + 1)
+                child["via"] = edge.type.value
+                child["provenance"] = edge.meta.get("provenance", EXTRACTED)
+                entry["children"].append(child)
+            return entry
+
+        return build(node, 0)
 
     def _column_parent(self, node_id: str) -> Optional[str]:
         node = self.get_node(node_id)
@@ -278,13 +359,40 @@ class ImpactGraph:
         h.add_nodes_from(self._g.nodes)
         for src, dst, data in self._g.edges(data=True):
             edge: Edge = data["edge"]
-            if not include_inferred and edge.meta.get("provenance") == INFERRED:
+            if not include_inferred and edge.meta.get("provenance", EXTRACTED) != EXTRACTED:
                 continue
             if IMPACT_DIRECTION[edge.type] == "forward":
                 h.add_edge(src, dst, type=edge.type.value)
             else:
                 h.add_edge(dst, src, type=edge.type.value)
         return h
+
+    # --------------------------------------------------------------- aliases
+
+    def link_table_aliases(self) -> int:
+        """Connect table nodes that name the same relation at different qualification.
+
+        Code often says ``analytics.fact_booking`` while dbt/warehouse say
+        ``prod.analytics.fact_booking``. When a shorter name is an unambiguous
+        suffix of exactly one longer name, add bidirectional ``depends_on``
+        alias edges so impact flows across the two spellings. Returns the
+        number of alias pairs linked.
+        """
+        tables = [n for n in self.nodes() if n.type in (NodeType.TABLE, NodeType.VIEW)]
+        by_bare = {n.id.split(":", 1)[1]: n for n in tables}
+        linked = 0
+        for short, node in by_bare.items():
+            parts = short.split(".")
+            candidates = [
+                other for bare, other in by_bare.items()
+                if bare != short and bare.endswith("." + short) and len(bare.split(".")) > len(parts)
+            ]
+            if len(candidates) == 1:
+                long_node = candidates[0]
+                for a, b in ((node.id, long_node.id), (long_node.id, node.id)):
+                    self.add_edge(Edge(src=a, dst=b, type=EdgeType.DEPENDS_ON, meta={"via": "alias"}))
+                linked += 1
+        return linked
 
     # ---------------------------------------------------------------- insight
 
@@ -338,7 +446,7 @@ class ImpactGraph:
         for node in self.nodes():
             lines.append(f'  "{_esc(node.id)}" [label="{_esc(node.name)}\\n({node.type.value})"];')
         for edge in self.edges():
-            style = ', style=dashed' if edge.meta.get("provenance") == INFERRED else ""
+            style = ', style=dashed' if edge.meta.get("provenance", EXTRACTED) != EXTRACTED else ""
             lines.append(f'  "{_esc(edge.src)}" -> "{_esc(edge.dst)}" [label="{edge.type.value}"{style}];')
         lines.append("}")
         return "\n".join(lines)

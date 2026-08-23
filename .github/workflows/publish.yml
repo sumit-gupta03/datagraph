@@ -1,0 +1,67 @@
+# Publishes to PyPI when a version tag (v1.2.3) is pushed, using PyPI "trusted
+# publishing" (no API token stored anywhere). One-time setup on pypi.org:
+#   Your projects -> Publishing -> add a "pending publisher":
+#     PyPI project name: impactgraph
+#     Owner: sumit-gupta03   Repository: impactgraph
+#     Workflow name: publish.yml   Environment name: pypi
+# Then:  git tag v0.3.0 && git push origin v0.3.0
+name: Publish to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and test
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest -q
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # GitHub release with the built artifacts
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+  publish:
+    # Runs only after you set the repository variable PYPI_TRUSTED_PUBLISHER=true
+    # (Settings -> Secrets and variables -> Actions -> Variables), i.e. once the
+    # trusted publisher above is configured on pypi.org.
+    if: vars.PYPI_TRUSTED_PUBLISHER == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write     # trusted publishing — no token stored anywhere
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
