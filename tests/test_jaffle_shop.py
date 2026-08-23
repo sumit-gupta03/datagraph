@@ -1,12 +1,12 @@
 """Real-world regression fixture: dbt's public jaffle_shop project, compiled with
-dbt-duckdb (manifest slimmed to the fields impactgraph reads)."""
+dbt-duckdb (manifest slimmed to the fields datagraph reads)."""
 
 from pathlib import Path
 
 import pytest
 
-from impactgraph import DbtExtractor, NodeType, analyze_impact
-from impactgraph.analysis.relationships import relationships
+from datagraph import DbtExtractor, NodeType, analyze_impact
+from datagraph.analysis.relationships import relationships
 
 MANIFEST = Path(__file__).resolve().parents[1] / "examples" / "jaffle_shop" / "manifest.json"
 CATALOG = MANIFEST.with_name("catalog.json")

@@ -1,6 +1,6 @@
 import json
 
-from impactgraph import OpenLineageExtractor, NodeType
+from datagraph import OpenLineageExtractor, NodeType
 
 
 def _events():

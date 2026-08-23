@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from impactgraph import DbtExtractor, NodeType, PythonExtractor
+from datagraph import DbtExtractor, NodeType, PythonExtractor
 
 BOM = b"\xef\xbb\xbf"
 
@@ -41,7 +41,7 @@ def test_dbt_extractor_handles_bom(tmp_path):
 
 def test_sql_extractor_handles_bom(tmp_path):
     pytest.importorskip("sqlglot")
-    from impactgraph.extractors.sql_extractor import SqlExtractor
+    from datagraph.extractors.sql_extractor import SqlExtractor
 
     (tmp_path / "v.sql").write_bytes(
         BOM + b"CREATE VIEW a.v AS SELECT id FROM raw.t;"

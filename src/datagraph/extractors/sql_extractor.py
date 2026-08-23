@@ -9,7 +9,7 @@ Parses ``.sql`` files and emits:
     ``raw.customers.customer_id``), so a column change propagates to the exact
     downstream columns that derive from it — including renamed ones.
 
-Install with: ``pip install impactgraph[sql]``
+Install with: ``pip install datagraph[sql]``
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover
 def _require_sqlglot() -> None:
     if not HAS_SQLGLOT:
         raise ImportError(
-            "sqlglot is required for SQL lineage. Install it with: pip install impactgraph[sql]"
+            "sqlglot is required for SQL lineage. Install it with: pip install datagraph[sql]"
         )
 
 

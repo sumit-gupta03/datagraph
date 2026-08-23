@@ -1,5 +1,5 @@
 from .model import EXTRACTED, INFERRED, LLM, IMPACT_DIRECTION, Edge, EdgeType, Node, NodeType
-from .graph import ImpactGraph, diff_graphs
+from .graph import DataGraph, ImpactGraph, diff_graphs
 
 __all__ = [
     "Edge",
@@ -11,5 +11,6 @@ __all__ = [
     "INFERRED",
     "LLM",
     "ImpactGraph",
+    "DataGraph",
     "diff_graphs",
 ]

@@ -11,7 +11,7 @@ Emits:
   * DynamoDB tables and S3 buckets declared as resources (``table:<name>``),
     referenced from a function's environment (``!Ref``) -> lambda DEPENDS_ON table.
 
-YAML parsing needs PyYAML (``pip install impactgraph[yaml]``); JSON works without it.
+YAML parsing needs PyYAML (``pip install datagraph[yaml]``); JSON works without it.
 CloudFormation intrinsic tags (``!Ref``, ``!GetAtt``, ``!Sub``) are accepted.
 """
 
@@ -194,7 +194,7 @@ def _load(path: Path) -> Dict:
     try:
         import yaml  # type: ignore
     except ImportError as e:
-        raise ImportError("PyYAML is required for YAML templates: pip install impactgraph[yaml]") from e
+        raise ImportError("PyYAML is required for YAML templates: pip install datagraph[yaml]") from e
 
     class _Loader(yaml.SafeLoader):
         pass

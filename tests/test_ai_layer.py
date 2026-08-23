@@ -12,8 +12,8 @@ import types
 
 import pytest
 
-from impactgraph.ai.explain import explain_impact
-from impactgraph.analysis import analyze_impact
+from datagraph.ai.explain import explain_impact
+from datagraph.analysis import analyze_impact
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def test_missing_anthropic_raises_helpful_error(analysis, monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(ImportError, match=r"pip install impactgraph\[ai\]"):
+    with pytest.raises(ImportError, match=r"pip install datagraph\[ai\]"):
         explain_impact(analysis)
 
 

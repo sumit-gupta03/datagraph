@@ -1,6 +1,6 @@
 import pytest
 
-from impactgraph import WarehouseExtractor, NodeType
+from datagraph import WarehouseExtractor, NodeType
 
 
 class FakeCursor:

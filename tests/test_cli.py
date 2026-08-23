@@ -1,6 +1,6 @@
 import json
 
-from impactgraph.cli import main
+from datagraph.cli import main
 
 
 def test_build_and_impact(tmp_path, dbt_manifest, capsys):

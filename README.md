@@ -1,4 +1,4 @@
-# impactgraph
+# datagraph
 
 **AI-powered Change Impact Graph for data and code systems.**
 
@@ -7,7 +7,7 @@ Answer the two questions every data / platform engineer asks:
 > *"If I change this file, function, dbt model, SQL column, or table — what can break?"*
 > *"Where does this table / column come from, and what does it feed?"*
 
-Projects like Graphify / Code-Graph-RAG build graphs from source code; DataHub and OpenLineage focus on data lineage. `impactgraph` connects both worlds into **one unified graph** and answers from it in seconds, locally:
+Projects like Graphify / Code-Graph-RAG build graphs from source code; DataHub and OpenLineage focus on data lineage. `datagraph` connects both worlds into **one unified graph** and answers from it in seconds, locally:
 
 ```
 Git Change → Python/JS Function → Lambda → API → Table → dbt Model → Report / Dashboard
@@ -17,7 +17,7 @@ Git Change → Python/JS Function → Lambda → API → Table → dbt Model →
 
 <p align="center">
   <img src="docs/images/lineage-jaffle-customers.png" alt="Lineage of the customers model in dbt's jaffle_shop project" width="900"><br>
-  <em>impactgraph lineage customers --html — upstream (left) through staging models to seed files, downstream (right) to the table and its columns. Real output on dbt's public jaffle_shop project.</em>
+  <em>datagraph lineage customers --html — upstream (left) through staging models to seed files, downstream (right) to the table and its columns. Real output on dbt's public jaffle_shop project.</em>
 </p>
 
 ## The key idea
@@ -42,54 +42,54 @@ Table names at different qualification (`analytics.fact_booking` in code vs `pro
 ## Install
 
 ```bash
-pip install impactgraph            # core (all extractors; sqlglot needed for SQL/column lineage)
-pip install impactgraph[sql]       # + sqlglot
-pip install impactgraph[ai]        # + Claude explanations and LLM lineage fallback
-pip install impactgraph[mcp]       # + MCP server for Claude Code / Cursor / Codex
-pip install impactgraph[all]       # everything (also PyYAML for YAML lineage files / serverless.yml)
+pip install datagraph            # core (all extractors; sqlglot needed for SQL/column lineage)
+pip install datagraph[sql]       # + sqlglot
+pip install datagraph[ai]        # + Claude explanations and LLM lineage fallback
+pip install datagraph[mcp]       # + MCP server for Claude Code / Cursor / Codex
+pip install datagraph[all]       # everything (also PyYAML for YAML lineage files / serverless.yml)
 ```
 
 ## Quick start
 
 ```bash
 # 1. Build the graph from whatever you have (any combination)
-impactgraph build --repo ./src --dbt-manifest target/manifest.json --dbt-catalog target/catalog.json \
+datagraph build --repo ./src --dbt-manifest target/manifest.json --dbt-catalog target/catalog.json \
                   --sql ./sql --airflow ./dags --lambda template.yaml --js ./web \
-                  --openlineage events.ndjson --warehouse "snowflake://..." -o impactgraph.json
+                  --openlineage events.ndjson --warehouse "snowflake://..." -o datagraph.json
 
 # 2. Impact — what breaks?
-impactgraph impact dbt:customer                         # a model / table / column / function / task
-impactgraph diff --repo . --graph impactgraph.json      # my current uncommitted change  ← the CI command
+datagraph impact dbt:customer                         # a model / table / column / function / task
+datagraph diff --repo . --graph datagraph.json      # my current uncommitted change  ← the CI command
 
 # 3. Lineage & relationships — where does it come from, what does it feed, how are tables related?
-impactgraph lineage table:prod.analytics.dim_customer   # upstream + downstream trees (--html for a picture)
-impactgraph relationships                               # every table: columns, foreign keys, lineage (--json)
-impactgraph paths dbt:customer exposure:revenue_report  # every propagation path
-impactgraph hotspots                                    # where a change hurts most
+datagraph lineage table:prod.analytics.dim_customer   # upstream + downstream trees (--html for a picture)
+datagraph relationships                               # every table: columns, foreign keys, lineage (--json)
+datagraph paths dbt:customer exposure:revenue_report  # every propagation path
+datagraph hotspots                                    # where a change hurts most
 
 # 4. Pictures
-impactgraph html dbt:customer -o impact.html            # interactive blast radius
-impactgraph lineage customers --html lineage.html       # interactive lineage
-impactgraph html --all -o graph.html                    # the whole graph (--with-columns for columns)
-impactgraph export --format graphml -o g.graphml        # also dot | cypher | json
+datagraph html dbt:customer -o impact.html            # interactive blast radius
+datagraph lineage customers --html lineage.html       # interactive lineage
+datagraph html --all -o graph.html                    # the whole graph (--with-columns for columns)
+datagraph export --format graphml -o g.graphml        # also dot | cypher | json
 
 # 5. Keep it fresh / extend
-impactgraph build ... --update                          # skip when inputs unchanged
-impactgraph watch ... ;  impactgraph hook-install --git-repo . ...
-impactgraph graph-diff old.json new.json                # schema / dependency drift
-impactgraph enrich --dry-run                            # LLM suggestions for SQL the parsers could not read (needs [ai])
+datagraph build ... --update                          # skip when inputs unchanged
+datagraph watch ... ;  datagraph hook-install --git-repo . ...
+datagraph graph-diff old.json new.json                # schema / dependency drift
+datagraph enrich --dry-run                            # LLM suggestions for SQL the parsers could not read (needs [ai])
 
 # 6. AI
-impactgraph explain dbt:customer                        # plain-language explanation (needs [ai])
-impactgraph mcp --graph impactgraph.json                # MCP server for coding assistants (needs [mcp])
+datagraph explain dbt:customer                        # plain-language explanation (needs [ai])
+datagraph mcp --graph datagraph.json                # MCP server for coding assistants (needs [mcp])
 ```
 
 <p align="center">
   <img src="docs/images/impact-demo.png" alt="Interactive blast-radius view" width="900"><br>
-  <em>impactgraph html models/customer.sql — change in one SQL file → models → tables → dashboards and the Python API, with risk, owners to notify and the test plan.</em>
+  <em>datagraph html models/customer.sql — change in one SQL file → models → tables → dashboards and the Python API, with risk, owners to notify and the test plan.</em>
 </p>
 
-Terminal output of `impactgraph impact`:
+Terminal output of `datagraph impact`:
 
 ```
 ⚠ Change Impact                     Changed: customer      Risk: HIGH (score 24.5)
@@ -114,7 +114,7 @@ Recommended tests:
 ## Python API
 
 ```python
-from impactgraph import (ImpactGraph, PythonExtractor, DbtExtractor, WarehouseExtractor,
+from datagraph import (ImpactGraph, PythonExtractor, DbtExtractor, WarehouseExtractor,
                          AirflowExtractor, LambdaExtractor, JsExtractor, OpenLineageExtractor,
                          LineageFileExtractor, DataHubExtractor, analyze_impact)
 
@@ -129,24 +129,24 @@ analysis = analyze_impact(graph, ["dbt:customer"])
 print(analysis.risk, analysis.owners, analysis.recommended_tests)
 
 print(graph.lineage("table:prod.analytics.dim_customer"))       # {'upstream': {...}, 'downstream': {...}}
-from impactgraph.analysis.relationships import relationships
+from datagraph.analysis.relationships import relationships
 print(relationships(graph)["table_relationships"])              # foreign keys + lineage between tables
 
-# Optional AI (pip install impactgraph[ai])
-from impactgraph.ai import explain_impact, suggest_lineage, apply_suggestions
+# Optional AI (pip install datagraph[ai])
+from datagraph.ai import explain_impact, suggest_lineage, apply_suggestions
 print(explain_impact(analysis))
 apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged provenance=llm
 ```
 
 ## Use it from AI coding assistants
 
-- **Claude Code skill:** copy `skills/impactgraph/` to `.claude/skills/impactgraph/` (or `~/.claude/skills/`). Ask *"what breaks if I change dim_customer?"*, *"where does fact_booking come from?"*, *"how are these tables related?"*.
-- **MCP server:** `impactgraph mcp --graph impactgraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`.
+- **Claude Code skill:** copy `skills/datagraph/` to `.claude/skills/datagraph/` (or `~/.claude/skills/`). Ask *"what breaks if I change dim_customer?"*, *"where does fact_booking come from?"*, *"how are these tables related?"*.
+- **MCP server:** `datagraph mcp --graph datagraph.json` exposes `impact`, `diff`, `find_nodes`, `paths`, `hotspots`, `lineage`, `relationships`.
 
 ## GitHub Action — impact comment on every PR
 
 ```yaml
-- uses: sumit-gupta03/impactgraph@main
+- uses: sumit-gupta03/datagraph@main
   with:
     repo-path: src
     dbt-manifest: target/manifest.json
@@ -155,9 +155,9 @@ apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)   # tagged 
 
 See `examples/github-workflow-impact.yml` and `action.yml`. Tagging `vX.Y.Z` builds and creates a GitHub Release (`.github/workflows/publish.yml`); PyPI publishing switches on once the trusted publisher is configured (see the workflow header).
 
-## How it compares: Graphify · DataHub · OpenLineage · impactgraph
+## How it compares: Graphify · DataHub · OpenLineage · datagraph
 
-| | Graphify | DataHub | OpenLineage | impactgraph |
+| | Graphify | DataHub | OpenLineage | datagraph |
 |---|---|---|---|---|
 | What it is | A skill that turns a folder into a knowledge graph for AI assistants | A deployed metadata platform / catalog | An open **standard + spec** for emitting lineage events (plus Marquez as a reference server) | A pip library + CLI + skill for pre-merge impact, lineage and schema relationships |
 | Question answered | "Help my AI assistant understand this repo" | "What data exists, who owns it, how is it connected, is it healthy?" | "What did this job read and write (at run time)?" | "If I change this, what breaks? Where does it come from? How are tables related?" |
@@ -172,7 +172,7 @@ See `examples/github-workflow-impact.yml` and `action.yml`. Tagging `vX.Y.Z` bui
 | Infrastructure | none | platform (DB, search, Kafka) | events need a backend | none — pip, a JSON file, runs in CI; skill + MCP |
 | AI role | extracts concepts from docs/images | n/a | n/a | explains results; optional fallback suggestions tagged `llm` |
 
-**Positioning:** OpenLineage is the *wire format* lineage travels in; DataHub is the *catalog* it lands in; Graphify is the *repo map* for an assistant; impactgraph is the *pre-merge check and lineage/relationship explorer* that also reads your code — and it **imports** OpenLineage events and DataHub lineage rather than competing with them. What it deliberately is not: a catalog (search, glossary, governance, quality monitoring).
+**Positioning:** OpenLineage is the *wire format* lineage travels in; DataHub is the *catalog* it lands in; Graphify is the *repo map* for an assistant; datagraph is the *pre-merge check and lineage/relationship explorer* that also reads your code — and it **imports** OpenLineage events and DataHub lineage rather than competing with them. What it deliberately is not: a catalog (search, glossary, governance, quality monitoring).
 
 **Known limits:** code languages are Python and JS/TS (regex-based for JS); call edges are name-resolved (tagged *inferred*); column lineage needs SQL or a catalog — otherwise a same-name heuristic (tagged *inferred*) or the opt-in `llm` fallback applies.
 
@@ -192,7 +192,7 @@ dag:nightly_bookings           task:nightly_bookings/build_dim        lambda:Get
 ## Development
 
 ```bash
-git clone https://github.com/sumit-gupta03/impactgraph && cd impactgraph
+git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e .[dev]
 pytest            # 108 tests, offline, ~7 s — includes dbt's real jaffle_shop project as a fixture
 ```

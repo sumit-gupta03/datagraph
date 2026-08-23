@@ -40,7 +40,7 @@ _COLORS = {
 }
 
 
-def render_html(graph: ImpactGraph, analysis: ImpactAnalysis, title: str = "impactgraph — change impact") -> str:
+def render_html(graph: ImpactGraph, analysis: ImpactAnalysis, title: str = "datagraph — change impact") -> str:
     depth: Dict[str, int] = {nid: 0 for nid in analysis.changed}
     depth.update({k: v for k, v in analysis.affected.items() if k not in depth})
     changed_names = ", ".join(graph.get_node(n).name if graph.get_node(n) else n for n in analysis.changed)
@@ -58,7 +58,7 @@ def render_lineage_html(
     upstream_depth: Optional[int] = None,
     downstream_depth: Optional[int] = None,
     include_inferred: bool = True,
-    title: str = "impactgraph — lineage",
+    title: str = "datagraph — lineage",
 ) -> str:
     lin = graph.lineage(node_id, upstream_depth, downstream_depth, include_inferred)
     depth: Dict[str, int] = {node_id: 0}
@@ -78,7 +78,7 @@ def render_graph_html(
     graph: ImpactGraph,
     node_ids: Optional[Iterable[str]] = None,
     hide_columns: bool = True,
-    title: str = "impactgraph — full graph",
+    title: str = "datagraph — full graph",
 ) -> str:
     """Whole-graph view: columns are topological 'layers' (sources left, dashboards right)."""
     ids = set(node_ids) if node_ids is not None else {n.id for n in graph.nodes()}

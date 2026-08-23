@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("sqlglot")
 
-from impactgraph.extractors.sql_extractor import SqlExtractor  # noqa: E402
+from datagraph.extractors.sql_extractor import SqlExtractor  # noqa: E402
 
 
 @pytest.fixture

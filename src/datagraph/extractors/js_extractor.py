@@ -10,7 +10,7 @@ No tree-sitter dependency: a small tokenizer-free scanner finds
   * calls by name inside functions (inferred, like the Python extractor), and
   * SQL embedded in template/normal strings -> table edges (code↔data bridge).
 
-Line spans are recorded so ``impactgraph diff`` can map changed lines to functions.
+Line spans are recorded so ``datagraph diff`` can map changed lines to functions.
 """
 
 from __future__ import annotations

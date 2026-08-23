@@ -2,12 +2,12 @@
 
 Run from this directory:
     python build_demo.py
-    impactgraph impact models/customer.sql --graph impactgraph.json
+    datagraph impact models/customer.sql --graph datagraph.json
 """
 
 from pathlib import Path
 
-from impactgraph import DbtExtractor, Edge, EdgeType, ImpactGraph, PythonExtractor
+from datagraph import DbtExtractor, Edge, EdgeType, ImpactGraph, PythonExtractor
 
 HERE = Path(__file__).parent
 
@@ -25,5 +25,5 @@ graph.add_edge(
     )
 )
 
-graph.save(HERE / "impactgraph.json")
-print(f"built {len(graph)} nodes, {len(graph.edges())} edges -> {HERE / 'impactgraph.json'}")
+graph.save(HERE / "datagraph.json")
+print(f"built {len(graph)} nodes, {len(graph.edges())} edges -> {HERE / 'datagraph.json'}")

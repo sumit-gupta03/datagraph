@@ -1,6 +1,6 @@
-from impactgraph import INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType, diff_graphs
-from impactgraph.analysis import analyze_impact
-from impactgraph.html_report import render_html
+from datagraph import INFERRED, Edge, EdgeType, ImpactGraph, Node, NodeType, diff_graphs
+from datagraph.analysis import analyze_impact
+from datagraph.html_report import render_html
 
 
 def test_call_edges_are_inferred_and_can_be_excluded(py_graph):
@@ -26,7 +26,7 @@ def test_exports(tmp_path, dbt_graph):
     dbt_graph.to_graphml(gml)
     assert "<graphml" in gml.read_text(encoding="utf-8")
     dot = dbt_graph.to_dot()
-    assert "digraph impactgraph" in dot and "dbt:customer" in dot
+    assert "digraph datagraph" in dot and "dbt:customer" in dot
     cypher = dbt_graph.to_cypher()
     assert "MERGE (n:DbtModel {id: 'dbt:customer'})" in cypher
     assert "DEPENDS_ON" in cypher

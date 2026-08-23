@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from impactgraph import LambdaExtractor, NodeType, PythonExtractor, ImpactGraph
-from impactgraph.cli import main
+from datagraph import LambdaExtractor, NodeType, PythonExtractor, ImpactGraph
+from datagraph.cli import main
 
 
 SAM_JSON = {

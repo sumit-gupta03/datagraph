@@ -1,7 +1,7 @@
 import textwrap
 
-from impactgraph import JsExtractor, NodeType
-from impactgraph.cli import main
+from datagraph import JsExtractor, NodeType
+from datagraph.cli import main
 
 
 def _project(tmp_path):

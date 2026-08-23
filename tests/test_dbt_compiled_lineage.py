@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from impactgraph import DbtExtractor, analyze_impact
+from datagraph import DbtExtractor, analyze_impact
 
 
 @pytest.fixture

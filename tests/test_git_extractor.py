@@ -4,7 +4,7 @@ import textwrap
 
 import pytest
 
-from impactgraph import PythonExtractor, changed_node_ids, collect_changes
+from datagraph import PythonExtractor, changed_node_ids, collect_changes
 
 pytestmark = pytest.mark.skipif(
     shutil.which("git") is None, reason="git not available"

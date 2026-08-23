@@ -442,7 +442,7 @@ class ImpactGraph:
         nx.write_graphml(self._plain_digraph(), str(path))
 
     def to_dot(self) -> str:
-        lines = ["digraph impactgraph {", "  rankdir=LR;", "  node [shape=box, fontname=Helvetica];"]
+        lines = ["digraph datagraph {", "  rankdir=LR;", "  node [shape=box, fontname=Helvetica];"]
         for node in self.nodes():
             lines.append(f'  "{_esc(node.id)}" [label="{_esc(node.name)}\\n({node.type.value})"];')
         for edge in self.edges():
@@ -492,6 +492,9 @@ class ImpactGraph:
     @classmethod
     def load(cls, path: Union[str, Path]) -> "ImpactGraph":
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+
+
+DataGraph = ImpactGraph  # preferred name; ImpactGraph kept for compatibility
 
 
 def diff_graphs(old: ImpactGraph, new: ImpactGraph) -> Dict:

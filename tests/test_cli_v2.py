@@ -1,6 +1,6 @@
 import json
 
-from impactgraph.cli import main
+from datagraph.cli import main
 
 
 def _build(tmp_path, dbt_manifest, py_project, extra=()):

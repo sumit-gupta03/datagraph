@@ -1,6 +1,6 @@
 """Column-level changes propagate through the owning model to downstream artifacts."""
 
-from impactgraph import Edge, EdgeType, Node, NodeType
+from datagraph import Edge, EdgeType, Node, NodeType
 
 
 def test_column_change_reaches_downstream_models_and_exposures(dbt_graph):

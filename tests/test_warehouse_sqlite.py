@@ -3,10 +3,10 @@ import sqlite3
 
 import pytest
 
-from impactgraph import WarehouseExtractor
-from impactgraph.analysis.relationships import relationships
-from impactgraph.cli import main
-from impactgraph.extractors import connect_warehouse
+from datagraph import WarehouseExtractor
+from datagraph.analysis.relationships import relationships
+from datagraph.cli import main
+from datagraph.extractors import connect_warehouse
 
 
 @pytest.fixture

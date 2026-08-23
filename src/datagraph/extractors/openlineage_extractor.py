@@ -12,7 +12,7 @@ nodes and edges:
   * ``columnLineage`` facet     -> column -> column DEPENDS_ON edges
   * ``ownership`` facet         -> ``owner`` on the dataset
 
-This is how impactgraph inherits lineage that DataHub / Marquez / Airflow
+This is how datagraph inherits lineage that DataHub / Marquez / Airflow
 already collected, and adds the code side on top.
 """
 

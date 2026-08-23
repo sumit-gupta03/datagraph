@@ -1,7 +1,7 @@
 import json
 
-from impactgraph import Edge, EdgeType, ImpactGraph, Node, NodeType
-from impactgraph.analysis import analyze_impact
+from datagraph import Edge, EdgeType, ImpactGraph, Node, NodeType
+from datagraph.analysis import analyze_impact
 
 
 def test_merge_unifies_code_and_data(py_graph, dbt_graph):

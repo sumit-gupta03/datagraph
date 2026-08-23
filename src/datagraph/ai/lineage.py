@@ -8,7 +8,7 @@ asks Claude for candidate relationships using **structured outputs**, and
 confidence and a reason. Those edges are shown with an ``(llm)`` marker,
 excluded by ``--no-inferred``, and can be reviewed in ``relationships --json``.
 
-Install with ``pip install impactgraph[ai]`` and set ``ANTHROPIC_API_KEY``.
+Install with ``pip install datagraph[ai]`` and set ``ANTHROPIC_API_KEY``.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def suggest_lineage(
     try:
         import anthropic
     except ImportError as e:
-        raise ImportError("LLM lineage suggestions require the 'anthropic' package: pip install impactgraph[ai]") from e
+        raise ImportError("LLM lineage suggestions require the 'anthropic' package: pip install datagraph[ai]") from e
 
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     payload = schema_summary(graph, max_tables=max_tables)
