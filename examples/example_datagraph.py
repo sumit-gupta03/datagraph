@@ -629,19 +629,24 @@ ol_events = [
     }],
 }, indent=2), encoding="utf-8")
 
-fragments = {
-    "python  ": PythonExtractor(project).extract(),   # scan the whole project so ids match Airflow/Lambda
-    "sql     ": SqlExtractor(project / "sql").extract() if HAS_SQLGLOT else None,
-    "airflow ": AirflowExtractor(project / "dags").extract(),
-    "lambda  ": LambdaExtractor(project / "serverless.yml", code_root=project).extract(),
-    "js      ": JsExtractor(project / "web").extract(),
-    "openlin.": OpenLineageExtractor(OUT / "openlineage.ndjson").extract(),
-    "lineage ": LineageFileExtractor(OUT / "lineage.json").extract(),
+sources = {
+    # scan the whole project so function ids line up with the Airflow / Lambda references
+    "python  ": lambda: PythonExtractor(project).extract(),
+    "sql     ": lambda: SqlExtractor(project / "sql").extract(),                     # needs [sql]  (sqlglot)
+    "airflow ": lambda: AirflowExtractor(project / "dags").extract(),
+    "lambda  ": lambda: LambdaExtractor(project / "serverless.yml", code_root=project).extract(),  # needs [yaml]
+    "js      ": lambda: JsExtractor(project / "web").extract(),
+    "openlin.": lambda: OpenLineageExtractor(OUT / "openlineage.ndjson").extract(),
+    "lineage ": lambda: LineageFileExtractor(OUT / "lineage.json").extract(),
 }
-for name, frag in fragments.items():
-    if frag is None:
-        print(f"    {name}: skipped (needs sqlglot)")
+fragments = {}
+for name, make in sources.items():
+    try:
+        fragments[name] = make()
+    except ImportError as exc:      # an optional extra is missing - keep going
+        print(f"    {name}: skipped ({exc})")
         continue
+    frag = fragments[name]
     kinds = {}
     for n in frag.nodes():
         kinds[n.type.value] = kinds.get(n.type.value, 0) + 1
@@ -667,8 +672,7 @@ full = ImpactGraph()
 full.merge(graph)          # the warehouse
 full.merge(dbt_graph)      # the dbt project
 for frag in fragments.values():
-    if frag is not None:
-        full.merge(frag)
+    full.merge(frag)
 linked = full.link_table_aliases()   # analytics.orders  ==  prod.analytics.orders
 print(f"merged graph: {len(full)} nodes, {len(full.edges())} edges ({linked} alias link(s) added)")
 
