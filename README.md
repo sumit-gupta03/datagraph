@@ -78,6 +78,11 @@ flowchart LR
 
 **Principles:** the graph is built deterministically from artifacts (never by an LLM) · every edge carries provenance (`extracted` / `inferred` / `llm`) and `--no-inferred` strips heuristics · nothing to deploy — pip, one JSON file, runs in CI · secrets never stored, personal data masked · LLMs are optional and only *explain*.
 
+> **New here?** Run the guided tour - it builds a demo warehouse and walks through every feature with real output:
+> ```bash
+> python examples/example_datagraph.py
+> ```
+
 ## Contents
 
 1. [Install](#install)

@@ -78,3 +78,14 @@ def test_dbt_tests_and_sql_are_captured(tmp_path):
     assert node.meta["sql"] == "select 1 as id"
     txt = context(g, "m")
     assert "dbt tests: 2" in txt and "select 1 as id" in txt
+
+
+def test_context_reports_ambiguity_with_candidates(dbt_graph):
+    """A dbt model and its physical table often share a name - say which ids exist."""
+    from datagraph import Node, NodeType
+
+    dbt_graph.add_node(Node(id="table:staging.customer", type=NodeType.TABLE, name="customer"))
+    txt = context(dbt_graph, "customer")
+    assert "ambiguous" in txt
+    assert "dbt:customer" in txt and "table:staging.customer" in txt
+    assert "No node matches" in context(dbt_graph, "definitely_not_here")

@@ -43,6 +43,13 @@ def context(graph: ImpactGraph, node_id: str, depth: int = 2, max_items: int = 4
     """Compact text pack describing one node for an assistant."""
     node = graph.get_node(node_id) or graph.resolve(node_id)
     if node is None:
+        matches = graph.find(node_id)
+        if matches:  # e.g. a dbt model and its physical table share a name
+            # tables / models first, columns last - that is what the asker usually meant
+            ranked = sorted(matches, key=lambda m: (m.type == NodeType.COLUMN, m.id))
+            ids = ", ".join(m.id for m in ranked[:10])
+            return (f"'{node_id}' is ambiguous - {len(matches)} nodes match. "
+                    f"Ask again with one of these ids: {ids}")
         return f"No node matches '{node_id}'."
     nid = node.id
     lines: List[str] = [f"# {node.name}  ({node.type.value})", f"id: {nid}"]

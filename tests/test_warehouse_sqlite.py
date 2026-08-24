@@ -89,3 +89,35 @@ def test_cli_build_warehouse_and_relationships(sqlite_db, tmp_path, capsys):
     html = tmp_path / "schema.html"
     assert main(["html", "--all", "--with-columns", "--graph", str(gp), "-o", str(html)]) == 0
     assert "table:orders" in html.read_text(encoding="utf-8")
+
+
+def test_system_catalogs_and_schemas_are_excluded(tmp_path):
+    """MySQL's mysql/sys/performance_schema and DuckDB's system/temp catalogs are engine-owned."""
+    from datagraph.extractors.warehouse_extractor import WarehouseExtractor as WE
+
+    db = tmp_path / "w.db"
+    con = sqlite3.connect(db); con.execute("CREATE TABLE t (id INTEGER)"); con.commit(); con.close()
+    where = WE(str(db))._where()
+    for schema in ("information_schema", "pg_catalog", "mysql", "performance_schema", "sys"):
+        assert f"'{schema}'" in where
+    assert "'system'" in where and "'temp'" in where and "table_catalog IS NULL" in where
+    # an explicit filter wins
+    assert WE(str(db), schemas=["analytics"])._where().count("'analytics'") == 1
+    assert "lower(table_catalog) = 'prod'" in WE(str(db), database="prod")._where()
+
+
+def test_duckdb_schema_has_no_system_objects(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    from datagraph import NodeType
+    from datagraph.extractors.warehouse_extractor import WarehouseExtractor as WE
+
+    con = duckdb.connect(str(tmp_path / "w.duckdb"))
+    con.execute("CREATE TABLE dim_customer (customer_id INTEGER PRIMARY KEY, country VARCHAR)")
+    con.execute("CREATE TABLE fact_sales (sale_id INTEGER PRIMARY KEY, customer_id INTEGER, amount DOUBLE)")
+    con.execute("CREATE VIEW v_country AS SELECT c.country, SUM(s.amount) amount FROM fact_sales s "
+                "JOIN dim_customer c ON c.customer_id = s.customer_id GROUP BY 1")
+    graph = WE(con, dialect="duckdb").extract()
+    con.close()
+    ids = {n.id for n in graph.nodes(NodeType.TABLE) + graph.nodes(NodeType.VIEW)}
+    assert any(i.endswith("main.dim_customer") for i in ids)
+    assert not [i for i in ids if "duckdb_" in i or "sqlite_" in i or i.startswith("table:system.")]

@@ -30,3 +30,7 @@ examples/**/*.html
 examples/**/impactgraph.json
 examples/**/*.cache.json
 examples/**/*.unparsed.json
+
+# example run artifacts
+examples/datagraph_demo_out/
+examples/*_out.txt

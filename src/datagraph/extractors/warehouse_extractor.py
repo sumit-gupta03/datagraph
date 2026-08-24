@@ -27,6 +27,13 @@ import sqlite3
 from typing import List, Optional, Sequence, Union
 
 from ..security import escape_literal
+
+#: catalogs / schemas owned by the engine itself, excluded unless asked for explicitly
+SYSTEM_CATALOGS = ("system", "temp")
+SYSTEM_SCHEMAS = (
+    "information_schema", "pg_catalog", "pg_toast", "sys", "sysibm", "syscat",
+    "mysql", "performance_schema", "innodb", "temp", "pg_temp_1",
+)
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
 
@@ -83,11 +90,18 @@ class WarehouseExtractor(Extractor):
         clauses = []
         if self.database:
             clauses.append(f"lower(table_catalog) = {escape_literal(self.database.lower())}")
+        else:
+            # DuckDB keeps its own objects in the `system` / `temp` catalogs
+            quoted = ", ".join(escape_literal(c) for c in SYSTEM_CATALOGS)
+            clauses.append(f"(table_catalog IS NULL OR lower(table_catalog) NOT IN ({quoted}))")
         if self.schemas:
             quoted = ", ".join(escape_literal(s.lower()) for s in self.schemas)
             clauses.append(f"lower(table_schema) IN ({quoted})")
         else:
-            clauses.append("lower(table_schema) NOT IN ('information_schema', 'pg_catalog')")
+            # engine-owned schemas: MySQL (mysql, sys, performance_schema), Postgres (pg_*),
+            # SQL Server (sys), DB2 (sysibm) - never part of a user's data model
+            quoted = ", ".join(escape_literal(s) for s in SYSTEM_SCHEMAS)
+            clauses.append(f"lower(table_schema) NOT IN ({quoted})")
         return (" WHERE " + " AND ".join(clauses)) if clauses else ""
 
     def _query(self, sql: str) -> List[tuple]:
