@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
+from ..metadata import dbt_governance
 from .base import Extractor
 
 _RESOURCE_NODE_TYPES = {
@@ -41,6 +42,8 @@ class DbtExtractor(Extractor):
         column_lineage: bool = True,
         dialect: Optional[str] = None,
         catalog_path: Optional[Union[str, Path]] = None,
+        run_results_path: Optional[Union[str, Path]] = None,
+        sources_path: Optional[Union[str, Path]] = None,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.column_lineage = column_lineage
@@ -49,6 +52,11 @@ class DbtExtractor(Extractor):
         # used to expand `select *` in compiled SQL. Auto-detected next to the manifest.
         cp = Path(catalog_path) if catalog_path else self.manifest_path.with_name("catalog.json")
         self.catalog_path = cp if cp.exists() else None
+        # dbt run_results.json / sources.json: test outcomes and source freshness, auto-detected
+        rp = Path(run_results_path) if run_results_path else self.manifest_path.with_name("run_results.json")
+        self.run_results_path = rp if rp.exists() else None
+        sp = Path(sources_path) if sources_path else self.manifest_path.with_name("sources.json")
+        self.sources_path = sp if sp.exists() else None
         self.unparsed: list = []  # compiled SQL that sqlglot could not parse (LLM fallback candidates)
 
     def extract(self) -> ImpactGraph:
@@ -105,6 +113,7 @@ class DbtExtractor(Extractor):
                         "tags": node.get("tags") or [],
                         "sql": (sql or "")[:4000] or None,
                         "tests": tests_by_model.get(unique_id, []),
+                        **dbt_governance(node),
                     },
                 )
             )
@@ -149,7 +158,7 @@ class DbtExtractor(Extractor):
                     id=gid,
                     type=NodeType.DBT_SOURCE,
                     name=f"{source_name}.{name}",
-                    meta={"unique_id": unique_id, "owner": _owner_of(source)},
+                    meta={"unique_id": unique_id, "owner": _owner_of(source), **dbt_governance(source)},
                 )
             )
             register_relation(
@@ -199,7 +208,70 @@ class DbtExtractor(Extractor):
         # Column-level lineage from compiled SQL (optional; needs sqlglot)
         if self.column_lineage:
             self._add_column_lineage(graph, manifest, unique_to_graph_id, relation_to_node, dialect)
+        self._add_run_status(graph, manifest, unique_to_graph_id)
         return graph
+
+    def _add_run_status(self, graph: ImpactGraph, manifest: dict, unique_to_graph_id: Dict[str, str]) -> None:
+        """dbt run_results.json -> per-model test outcomes; sources.json -> source freshness.
+
+        Stored as ``meta["status"]`` = {tests_passed, tests_failed, failing_tests[], state,
+        last_run, freshness}. This is the local equivalent of a catalog ingesting dbt assertions.
+        """
+        nodes = manifest.get("nodes", {})
+        if self.run_results_path:
+            try:
+                run = json.loads(self.run_results_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                run = {}
+            generated = (run.get("metadata") or {}).get("generated_at")
+            for result in run.get("results", []):
+                uid = result.get("unique_id")
+                if not uid:
+                    continue
+                status = str(result.get("status", "")).lower()
+                node = nodes.get(uid) or {}
+                if node.get("resource_type") == "test":
+                    # attribute the outcome to every model the test covers
+                    for covered in (node.get("depends_on") or {}).get("nodes", []):
+                        gid = unique_to_graph_id.get(covered)
+                        target = graph.get_node(gid) if gid else None
+                        if target is None:
+                            continue
+                        st = target.meta.setdefault("status", {})
+                        passed = status in ("pass", "success")
+                        st["tests_passed"] = st.get("tests_passed", 0) + (1 if passed else 0)
+                        st["tests_failed"] = st.get("tests_failed", 0) + (0 if passed else 1)
+                        if not passed:
+                            st.setdefault("failing_tests", []).append(node.get("name", uid))
+                        st["last_run"] = generated
+                else:
+                    gid = unique_to_graph_id.get(uid)
+                    target = graph.get_node(gid) if gid else None
+                    if target is None:
+                        continue
+                    st = target.meta.setdefault("status", {})
+                    st["state"] = status                      # success | error | skipped ...
+                    st["last_run"] = generated
+                    if result.get("execution_time") is not None:
+                        st["execution_time"] = round(float(result["execution_time"]), 3)
+
+        if self.sources_path:
+            try:
+                src = json.loads(self.sources_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError):
+                src = {}
+            for result in src.get("results", []):
+                gid = unique_to_graph_id.get(result.get("unique_id", ""))
+                target = graph.get_node(gid) if gid else None
+                if target is None:
+                    continue
+                st = target.meta.setdefault("status", {})
+                st["freshness"] = str(result.get("status", "")).lower()   # pass | warn | error | runtime error
+                maxlt = (result.get("criteria") or {}).get("warn_after")
+                if result.get("max_loaded_at"):
+                    st["max_loaded_at"] = result["max_loaded_at"]
+                if maxlt:
+                    st["freshness_threshold"] = maxlt
 
     def _schema_mapping(self, manifest) -> dict:
         """{database: {schema: {relation: {column: type}}}} from catalog.json + manifest columns."""

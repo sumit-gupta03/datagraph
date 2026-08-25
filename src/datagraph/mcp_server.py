@@ -96,8 +96,25 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
         m.pop("classification", None)
         return m
 
+    def search(query: str = "", type: str = "", domain: str = "", tag: str = "", term: str = "",
+               owner: str = "", limit: int = 25) -> list:
+        """Search every asset by name, id, description, column name, owner, tag, glossary term or
+        domain, with catalog-style filters. Use this first when the user names something vaguely."""
+        from .analysis.discovery import search as _search
+
+        return _search(_graph(), query, node_type=type or None, domain=domain or None, tag=tag or None,
+                       term=term or None, owner=owner or None, limit=limit)
+
+    def sensitive_data() -> dict:
+        """Where personal data lives and what is exposed to it: tables with sensitive-looking columns,
+        the dashboards/APIs downstream of them, and which columns were masked during profiling."""
+        from .analysis.discovery import pii_report
+
+        return pii_report(_graph())
+
     return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
-            "lineage": lineage, "relationships": relationships, "context": context, "model": model}
+            "lineage": lineage, "relationships": relationships, "context": context, "model": model,
+            "search": search, "sensitive_data": sensitive_data}
 
 
 def serve(graph_path: str) -> None:

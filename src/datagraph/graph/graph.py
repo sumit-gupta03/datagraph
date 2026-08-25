@@ -26,6 +26,8 @@ class ImpactGraph:
 
     def __init__(self) -> None:
         self._g = nx.MultiDiGraph()
+        #: graph-level metadata that survives save/load - business glossary, build info, ...
+        self.meta: Dict = {}
 
     # ------------------------------------------------------------------ build
 
@@ -54,6 +56,11 @@ class ImpactGraph:
         self._g.add_edge(edge.src, edge.dst, edge=edge)
 
     def merge(self, other: "ImpactGraph") -> None:
+        for key, value in (getattr(other, "meta", None) or {}).items():
+            if isinstance(value, dict) and isinstance(self.meta.get(key), dict):
+                self.meta[key].update(value)
+            else:
+                self.meta[key] = value
         for node in other.nodes():
             self.add_node(node)
         for edge in other.edges():
@@ -471,11 +478,14 @@ class ImpactGraph:
     # ------------------------------------------------------------ persistence
 
     def to_dict(self) -> Dict:
-        return {
+        out: Dict = {
             "version": 2,
             "nodes": [n.to_dict() for n in self.nodes()],
             "edges": [e.to_dict() for e in self.edges()],
         }
+        if self.meta:                      # omitted when empty so plain graphs stay byte-identical
+            out["meta"] = self.meta
+        return out
 
     def save(self, path: Union[str, Path]) -> None:
         Path(path).write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
@@ -483,6 +493,7 @@ class ImpactGraph:
     @classmethod
     def from_dict(cls, d: Dict) -> "ImpactGraph":
         g = cls()
+        g.meta = d.get("meta") or {}
         for nd in d.get("nodes", []):
             g.add_node(Node.from_dict(nd))
         for ed in d.get("edges", []):

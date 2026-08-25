@@ -10,6 +10,8 @@ from .graph import EXTRACTED, INFERRED, LLM, DataGraph, Edge, EdgeType, ImpactGr
 from .analysis import ImpactAnalysis, analyze_impact
 from .knowledge import build_wiki, context
 from .profiling import profile_warehouse
+from .metadata import apply_metadata, load_metadata, glossary_index, domains, deprecated_assets
+from .analysis.discovery import pii_report, search
 from .analysis.modeling import classify_tables, propose_from_table, star_schema
 from .extractors.registry import ExtractorPlugin, register
 from .extractors import (
@@ -27,10 +29,11 @@ from .extractors import (
     collect_changes,
 )
 
-__version__ = "0.8.4"
+__version__ = "0.9.0"
 
 __all__ = [
-    "build_wiki", "context", "profile_warehouse", "classify_tables", "star_schema", "propose_from_table", "ExtractorPlugin", "register",
+    "build_wiki", "context", "profile_warehouse", "apply_metadata", "load_metadata", "glossary_index",
+    "domains", "deprecated_assets", "pii_report", "search", "classify_tables", "star_schema", "propose_from_table", "ExtractorPlugin", "register",
     "Edge",
     "EdgeType",
     "ImpactGraph",

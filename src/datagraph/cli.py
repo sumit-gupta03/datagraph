@@ -43,6 +43,9 @@ DEFAULT_GRAPH = "datagraph.json"
 def _add_build_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--repo", help="Path to a Python code repo to scan")
     p.add_argument("--dbt-manifest", help="Path to a dbt manifest.json")
+    p.add_argument("--dbt-run-results", help="dbt run_results.json - test outcomes and model run state (auto-detected next to the manifest)")
+    p.add_argument("--dbt-sources", help="dbt sources.json - source freshness results (auto-detected next to the manifest)")
+    p.add_argument("--metadata", help="Governance metadata file (YAML/JSON): glossary, domains, deprecations, owners")
     p.add_argument("--dbt-catalog", help="Path to dbt catalog.json (from `dbt docs generate`) — expands SELECT * in column lineage; auto-detected next to the manifest")
     p.add_argument("--sql", help="Directory of .sql files (requires [sql] extra)")
     p.add_argument("--sql-dialect", default=None, help="sqlglot dialect (e.g. snowflake)")
@@ -184,8 +187,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_an.add_argument("--sample", type=int, default=100000, help="Rows sampled per table for profiling")
     p_an.add_argument("--no-top-values", action="store_true")
     p_an.add_argument("--no-inferred", action="store_true", help="Declared foreign keys only for the model")
+    p_an.add_argument("--metadata", default=None, help="Governance metadata file (glossary, domains, deprecations)")
     p_an.add_argument("--title", default="datagraph analysis")
     p_an.add_argument("--json", action="store_true", help="Print the summary as JSON")
+
+    p_search = sub.add_parser("search", help="Search every asset: names, ids, descriptions, columns, owners, tags, glossary terms, domains")
+    p_search.add_argument("query", nargs="?", default="", help="Free text (optional when filtering)")
+    p_search.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_search.add_argument("--type", dest="node_type", default=None, help="Filter by node type (table, dbt_model, dashboard, ...)")
+    p_search.add_argument("--domain", default=None)
+    p_search.add_argument("--tag", default=None)
+    p_search.add_argument("--term", default=None, help="Filter by glossary term")
+    p_search.add_argument("--owner", default=None)
+    p_search.add_argument("--columns", action="store_true", help="Include column nodes in the results")
+    p_search.add_argument("--limit", type=int, default=25)
+    p_search.add_argument("--json", action="store_true")
+
+    p_pii = sub.add_parser("pii", help="Sensitive-data report: where personal data lives and what is exposed to it")
+    p_pii.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_pii.add_argument("--no-inferred", action="store_true")
+    p_pii.add_argument("--json", action="store_true")
+
+    p_gloss = sub.add_parser("glossary", help="Business glossary: terms, definitions and the assets that carry them")
+    p_gloss.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_gloss.add_argument("--json", action="store_true")
 
     p_plug = sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
 
@@ -258,6 +283,9 @@ def _dispatch(args: argparse.Namespace) -> int:
         "context": _cmd_context,
         "plugins": _cmd_plugins,
         "model": _cmd_model,
+        "search": _cmd_search,
+        "pii": _cmd_pii,
+        "glossary": _cmd_glossary,
         "analyze": _cmd_analyze,
         "watch": _cmd_watch,
         "hook-install": _cmd_hook_install,
@@ -294,7 +322,9 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
         graph.merge(fragment)
     if args.dbt_manifest:
         ext = DbtExtractor(args.dbt_manifest, column_lineage=not args.no_column_lineage, dialect=args.sql_dialect,
-                           catalog_path=getattr(args, "dbt_catalog", None))
+                           catalog_path=getattr(args, "dbt_catalog", None),
+                           run_results_path=getattr(args, "dbt_run_results", None),
+                           sources_path=getattr(args, "dbt_sources", None))
         fragment = ext.extract()
         _UNPARSED.extend(ext.unparsed)
         log(f"dbt: {len(fragment)} nodes from {args.dbt_manifest}")
@@ -361,6 +391,15 @@ def _build_graph(args: argparse.Namespace, log=print) -> ImpactGraph:
         fragment = plugin.extract(value, **options)
         log(f"{plugin.name}: {len(fragment)} nodes from {value}")
         graph.merge(fragment)
+    if getattr(args, "metadata", None):
+        from .metadata import apply_metadata, load_metadata
+
+        applied = apply_metadata(graph, load_metadata(args.metadata))
+        log(f"metadata: {applied['terms']} term link(s), {applied['domains']} domain assignment(s), "
+            f"{applied['deprecations']} deprecation(s), {applied['owners']} owner(s)"
+            + (f"; {applied['unmatched']} reference(s) matched nothing" if applied["unmatched"] else ""))
+        for ref in applied.get("unmatched_refs", []):
+            log(f"  unmatched: {ref}")
     if not getattr(args, "no_alias_linking", False):
         linked = graph.link_table_aliases()
         if linked:
@@ -693,6 +732,12 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     if not args.no_profile:
         res = profile_warehouse(connection, graph, sample=args.sample, top_values=not args.no_top_values, log=None)
         say(f"profiling: {len(res)} tables (sensitive-looking columns masked)")
+    if args.metadata:
+        from .metadata import apply_metadata, load_metadata
+
+        applied = apply_metadata(graph, load_metadata(args.metadata))
+        say(f"metadata: {applied['terms']} term link(s), {applied['domains']} domain assignment(s), "
+            f"{applied['deprecations']} deprecation(s)")
     graph.save(out / "datagraph.json")
     rel = relationships(graph, include_columns=True)
     (out / "relationships.json").write_text(json.dumps(rel, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -716,6 +761,82 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     say(f"wiki: {stats['pages']} pages")
     say(f"-> {out}/  (datagraph.json, relationships.json, MODEL.md, er-diagram.mmd, lineage.html, wiki/)")
     say("next: datagraph lineage <table> --graph " + str(out / "datagraph.json") + "  |  datagraph context <table> --graph ...  |  datagraph mcp --graph ...")
+    return 0
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    from .analysis.discovery import search
+
+    graph = _load_graph(args.graph)
+    rows = search(graph, args.query, node_type=args.node_type, domain=args.domain, tag=args.tag,
+                  term=args.term, owner=args.owner, include_columns=args.columns, limit=args.limit)
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+        return 0
+    if not rows:
+        print("no matches")
+        return 0
+    for r in rows:
+        bits = [r["type"]]
+        if r["domain"]:
+            bits.append(f"domain={r['domain']}")
+        if r["owner"]:
+            bits.append(f"owner={r['owner']}")
+        if r["terms"]:
+            bits.append("terms=" + ",".join(str(t) for t in r["terms"]))
+        if r["deprecated"]:
+            bits.append("DEPRECATED")
+        print(f"{r['id']}\t{' | '.join(bits)}\t(matched {r['matched_on']})")
+        if r["description"]:
+            print(f"    {r['description']}")
+    return 0
+
+
+def _cmd_pii(args: argparse.Namespace) -> int:
+    from .analysis.discovery import pii_report
+
+    graph = _load_graph(args.graph)
+    report = pii_report(graph, include_inferred=not args.no_inferred)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, default=str))
+        return 0
+    if not report["tables"]:
+        print("no columns look like personal data")
+        return 0
+    print(f"{report['sensitive_columns']} sensitive-looking column(s) in {len(report['tables'])} table(s)\n")
+    for row in report["tables"]:
+        owner = f"  owner={row['owner']}" if row["owner"] else "  owner=UNOWNED"
+        print(f"{row['id']}{owner}")
+        print(f"    columns : {', '.join(row['columns'])}")
+        if row["masked_in_profile"]:
+            print(f"    masked  : {', '.join(row['masked_in_profile'])} (values withheld from profiles)")
+        if row["exposed_to"]:
+            print("    exposed : " + ", ".join(f"{e['name']} ({e['type']})" for e in row["exposed_to"]))
+        else:
+            print(f"    exposed : nothing downstream ({row['downstream']} node(s) affected)")
+    if report["unowned"]:
+        print(f"\nunowned tables holding personal data: {len(report['unowned'])}")
+    print(f"\nnote: {report['note']}")
+    return 0
+
+
+def _cmd_glossary(args: argparse.Namespace) -> int:
+    from .metadata import glossary_index
+
+    graph = _load_graph(args.graph)
+    index = glossary_index(graph)
+    if args.json:
+        print(json.dumps(index, indent=2, sort_keys=True, default=str))
+        return 0
+    if not index:
+        print("no glossary terms in this graph (attach them with --metadata datagraph.yml or dbt meta.terms)")
+        return 0
+    for name, entry in index.items():
+        owner = f"  [owner: {entry['owner']}]" if entry.get("owner") else ""
+        print(f"{name}{owner}")
+        if entry["definition"]:
+            print(f"    {entry['definition']}")
+        print(f"    assets ({len(entry['assets'])}): {', '.join(entry['assets'][:8])}")
     return 0
 
 

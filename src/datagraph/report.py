@@ -95,6 +95,10 @@ def render_analysis(graph: ImpactGraph, analysis: ImpactAnalysis, console: Conso
             console.print(f"  {count} {type_name.replace('_', ' ')}(s)")
         console.print()
 
+    if getattr(analysis, "warnings", None):
+        console.print()
+        for warning in analysis.warnings[:10]:
+            console.print(f"[yellow]![/yellow] {escape(warning)}")
     if analysis.owners:
         console.print("[bold]Notify (owners of affected artifacts):[/bold]")
         for owner, names in analysis.owners.items():

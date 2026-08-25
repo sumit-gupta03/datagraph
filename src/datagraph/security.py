@@ -73,6 +73,16 @@ def wrap_untrusted(text: str) -> str:
     return f"<data>\n{safe}\n</data>"
 
 
+#: "<thing>_name" is only personal when <thing> is a person - a product/table/file name is not
+_NON_PERSONAL = (
+    "product", "item", "sku", "brand", "company", "org", "organisation", "organization", "team",
+    "department", "project", "service", "table", "column", "field", "file", "folder", "database",
+    "schema", "index", "tag", "category", "event", "job", "task", "step", "model", "report",
+    "dashboard", "metric", "currency", "country", "region", "city", "state", "store", "warehouse",
+    "vendor", "supplier", "channel", "campaign", "role", "group", "status", "type", "class", "node",
+)
+
+
 def is_sensitive_column(name: Optional[str]) -> bool:
     """Heuristic: does this column name look like it holds personal / secret data?"""
     if not name:
@@ -80,6 +90,9 @@ def is_sensitive_column(name: Optional[str]) -> bool:
     n = str(name).lower()
     if n.endswith(("_id", "_key", "_sk", "_fk")) and not n.startswith(("device", "account", "card")):
         return False  # plain keys are fine to sample
+    for suffix in ("_name", "_mail", "_address", "_ip", "_lat", "_long"):
+        if n.endswith(suffix) and n[: -len(suffix)] in _NON_PERSONAL:
+            return False
     return bool(_SENSITIVE.search(n))
 
 

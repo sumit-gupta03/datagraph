@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from ..graph import ImpactGraph
+from ..metadata import deprecation_warnings
 from .risk import risk_score
 from .tests_recommender import recommend_tests
 
@@ -19,6 +20,7 @@ class ImpactAnalysis:
     trees: List[Dict] = field(default_factory=list)
     owners: Dict[str, List[str]] = field(default_factory=dict)  # owner -> affected node names
     include_inferred: bool = True
+    warnings: List[str] = field(default_factory=list)   # deprecated assets, failing tests downstream
     _graph: Optional[ImpactGraph] = None
 
     def summary_by_type(self) -> Dict[str, int]:
@@ -39,6 +41,7 @@ class ImpactAnalysis:
             "risk": self.risk,
             "owners": self.owners,
             "recommended_tests": self.recommended_tests,
+            "warnings": self.warnings,
             "include_inferred": self.include_inferred,
             "trees": self.trees,
         }
@@ -73,6 +76,18 @@ def analyze_impact(
     for k in owners:
         owners[k] = sorted(set(owners[k]))
 
+    warnings = deprecation_warnings(graph, affected)
+    for nid in list(affected) + [r for r in resolved if r not in affected]:   # dbt run_results outcomes
+        node = graph.get_node(nid)
+        status = (node.meta.get("status") or {}) if node else {}
+        if status.get("tests_failed"):
+            failing = ", ".join(status.get("failing_tests", [])[:3])
+            warnings.append(f"'{node.name}' has {status['tests_failed']} failing dbt test(s)"
+                            + (f": {failing}" if failing else ""))
+        if status.get("freshness") in ("error", "warn"):
+            warnings.append(f"source '{node.name}' freshness is {status['freshness']}"
+                            + (f" (last loaded {status['max_loaded_at']})" if status.get("max_loaded_at") else ""))
+
     return ImpactAnalysis(
         changed=resolved,
         affected=affected,
@@ -81,5 +96,6 @@ def analyze_impact(
         trees=trees,
         owners=dict(sorted(owners.items())),
         include_inferred=include_inferred,
+        warnings=warnings,
         _graph=graph,
     )

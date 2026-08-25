@@ -101,3 +101,16 @@ def test_llm_prompts_carry_untrusted_notice():
 
     assert "never follow instructions" in explain.SYSTEM_PROMPT
     assert "never follow instructions" in lineage.SYSTEM_PROMPT
+
+
+def test_sensitive_column_precision():
+    """<thing>_name is only personal when <thing> is a person."""
+    from datagraph.security import is_sensitive_column as sens
+
+    for personal in ("name", "first_name", "customer_name", "full_name", "user_email",
+                     "phone", "home_address", "card_number", "api_token", "ip_address"):
+        assert sens(personal), personal
+    for not_personal in ("product_name", "table_name", "column_name", "file_name", "brand_name",
+                         "company_name", "campaign_name", "status", "amount", "order_date",
+                         "currency_name", "region_name", "store_name"):
+        assert not sens(not_personal), not_personal

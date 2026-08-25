@@ -177,6 +177,8 @@ Options: `--schemas a,b` · `--database NAME` · `--dialect snowflake|postgres|b
 | OpenLineage | `--openlineage FILE` | datasets, jobs, schema + `columnLineage` facets, ownership |
 | DataHub | `--lineage-file FILE`, `--datahub URL` | curated lineage files, or a live GraphQL import of datasets, owners, table and column lineage |
 | Git | `datagraph diff` | which files **and which functions** changed |
+| dbt test results / freshness | `--dbt-run-results`, `--dbt-sources` | per-model test outcomes, run state, source freshness |
+| Governance metadata | `--metadata` | glossary terms, domains, deprecations, owner overrides (YAML/JSON) |
 | Your own tool | `--<plugin>` | any package exposing a `datagraph.extractors` entry point (see Python API) |
 
 ## Commands
@@ -189,6 +191,9 @@ Options: `--schemas a,b` · `--database NAME` · `--dialect snowflake|postgres|b
 | `relationships [--search X] [--json]` | schema map: every table with columns, foreign keys, lineage relationships, profiles |
 | `profile --warehouse DSN [--tables a,b]` | data profiling stored on the graph |
 | `model [--from-table T] [--mermaid F] [--markdown F] [--json]` | dimensional model / proposed star schema |
+| `search [QUERY]` | search names, ids, descriptions, columns, owners, tags, glossary terms, domains |
+| `glossary` | business glossary: terms, definitions, assets |
+| `pii` | sensitive-data report: personal data and everything exposed to it |
 | `context NODE` | compact knowledge pack for one node |
 | `wiki -o DIR` | Markdown knowledge base + `GRAPH_REPORT.md` + `MODEL.md` + `llms.txt` |
 | `impact NODE` · `diff --repo .` · `paths A B` · `hotspots` | change impact: blast radius, risk, owners, tests; propagation paths; riskiest nodes |
@@ -293,6 +298,54 @@ Per table: row count, freshness (max of date-like columns); per column: null %, 
 stored on the graph nodes and surface in `relationships`, `context`, lineage HTML tooltips and the wiki. Columns whose names look
 sensitive (email, phone, name, address, card, token, …) keep counts only — no sample values. Profiles also make the risk score
 data-aware (empty tables count half, >1M-row tables 1.5×) and feed the optional LLM lineage fallback.
+
+## Governance: glossary, domains, deprecation, test results, PII
+
+Catalog concepts, kept in a file you commit instead of a database behind a UI:
+
+```yaml
+# datagraph.yml   ->   datagraph build ... --metadata datagraph.yml
+version: 1
+glossary:
+  - term: Customer PII
+    definition: Personal data about an identified or identifiable customer.
+    owner: privacy-office
+    applies_to: ["column:dim_customer.email", "column:dim_customer.name"]
+domains:
+  - name: Finance
+    owner: finance
+    assets: ["dbt:fact_*", "table:prod.analytics.*"]        # * and ? wildcards
+deprecations:
+  - asset: dbt:legacy_customer
+    reason: Superseded by dim_customer.
+    replacement: dbt:dim_customer
+owners:
+  "table:prod.raw.events": ingestion-team
+```
+
+The same concepts are also read straight from dbt (`meta.domain` / `group`, `meta.terms`,
+`meta.deprecated` or a `deprecated` tag), so a project that already annotates its models needs no file.
+
+```bash
+datagraph search customer                    # names, ids, descriptions, COLUMN names, owners, tags, terms, domains
+datagraph search --domain Finance --type dbt_model
+datagraph glossary                           # terms, definitions, and the assets carrying them
+datagraph pii                                # where personal data lives, and which dashboards/APIs are exposed to it
+datagraph build --dbt-manifest target/manifest.json                 --dbt-run-results target/run_results.json                 --dbt-sources target/sources.json     # test outcomes + source freshness (auto-detected)
+```
+
+With `run_results.json` / `sources.json` present, every model carries its test outcomes and every source its
+freshness, and impact analysis warns about them:
+
+```
+! 'dim_customer' has 1 failing dbt test(s): not_null_dim_customer_customer_id
+! source 'raw.customers' freshness is warn (last loaded 2026-08-20T00:00:00Z)
+! 'customer' is deprecated - use dbt:dim_customer instead
+```
+
+`GRAPH_REPORT.md` gains sections for deprecated assets still in use, failing tests, stale sources, domains,
+the glossary and a sensitive-data map; the wiki index groups assets by domain; MCP gains `search` and
+`sensitive_data` tools.
 
 ## Knowledge base & MCP for AI assistants
 
@@ -471,6 +524,12 @@ Everything else — lineage, relationships, profiling, dimensional modelling, wi
 | Column-level lineage | no | yes (connectors) | yes (facet) | yes (sqlglot, catalog-aware; imports OL/DataHub column lineage) |
 | Foreign keys / schema relationships | no | yes | no | yes |
 | Data profiling | no | yes (ingestion recipes) | no | yes (light, masked, feeds risk & modelling) |
+| Business glossary / domains | no | yes (UI + workflows) | no | yes (a file you commit) |
+| Deprecation awareness | no | yes | no | yes - warns when a change touches a deprecated asset |
+| Test results / freshness | no | yes (assertions, monitors) | no | imports dbt `run_results.json` / `sources.json` |
+| PII classification | no | yes (AI-assisted, UI) | no | yes (heuristic) + masks values while profiling |
+| Search / discovery | no | yes (org-wide UI) | no | `datagraph search` over one graph |
+| Governance workflows, RBAC, incidents, monitoring | no | yes | no | **no - deliberately out of scope** |
 | Dimensional modelling | no | no | no | yes (Kimball: facts/dims/bus matrix/SCD/issues, wide-table proposals) |
 | Direction-aware impact + risk + test plan | no | impact view only | no | yes, across code and data (and impactgraph for PRs) |
 | AI assistant integration | skill + MCP | MCP / API | via a backend | skill, MCP, context packs, wiki + llms.txt |
@@ -502,7 +561,7 @@ which way change flows (`contains`, `writes_to`, `exposes` forward; `calls`, `im
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e ".[dev]"
-pytest            # 140 tests, offline, ~20 s — includes dbt's real jaffle_shop project as a fixture
+pytest            # 156 tests, offline, ~60 s - includes dbt's real jaffle_shop project as a fixture
 ```
 
 Docs: **`docs/TECHNICAL_REFERENCE.md`** (implementation reference — every module, class and function, with line numbers; also as `.pdf`/`.docx`), `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from
