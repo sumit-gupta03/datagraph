@@ -505,7 +505,7 @@ pip install -e ".[dev]"
 pytest            # 140 tests, offline, ~20 s — includes dbt's real jaffle_shop project as a fixture
 ```
 
-Docs: `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from
+Docs: **`docs/TECHNICAL_REFERENCE.md`** (implementation reference — every module, class and function, with line numbers; also as `.pdf`/`.docx`), `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from
 zero). Tagging `vX.Y.Z` builds wheels, creates a GitHub Release and publishes `datagraph-core` to PyPI via trusted publishing
 (`.github/workflows/publish.yml`).
 
