@@ -148,3 +148,54 @@ def test_mysql_catalog_placeholder_and_quoting():
     # mixed-case parts are quoted with the engine's own character
     assert _relation_sql("table:analytics.Orders", None, False, "`") == "analytics.`Orders`"
     assert _relation_sql("table:analytics.orders", None, False, "`") == "analytics.orders"
+
+
+def test_engine_detection_sees_through_sqlalchemy_wrappers():
+    """connect() returns a SQLAlchemy _ConnectionFairy: sniffing type(conn).__module__ reports
+    'sqlalchemy' and silently picked the wrong quote character (MySQL then read "col" as the
+    string 'col') and disabled every usage query. Found by the live-engine CI job."""
+    from datagraph.extractors.warehouse_extractor import dbapi_connection, engine_name
+    from datagraph.profiling import _quote_char
+    from datagraph.usage import detect_dialect
+
+    class FakePyMySQL:
+        __module__ = "pymysql.connections"
+
+    class FakeFairy:                      # what sqlalchemy's raw_connection() hands back
+        __module__ = "sqlalchemy.pool.base"
+
+        def __init__(self, inner):
+            self.dbapi_connection = inner
+            self.driver_connection = inner
+
+    wrapped = FakeFairy(FakePyMySQL())
+    assert isinstance(dbapi_connection(wrapped), FakePyMySQL)
+    assert engine_name(wrapped) == "mysql"
+    assert detect_dialect(wrapped) == "mysql"
+    assert _quote_char(wrapped) == "`"
+
+    class FakePsycopg:
+        __module__ = "psycopg2.extensions"
+
+    assert engine_name(FakeFairy(FakePsycopg())) == "postgres"
+    assert _quote_char(FakeFairy(FakePsycopg())) == '"'
+    # a bare (unwrapped) connection still works, and an unknown driver never raises
+    assert engine_name(FakePyMySQL()) == "mysql"
+    assert engine_name(object()) == "builtins"
+
+
+def test_sqlite_detected_through_a_wrapper(tmp_path):
+    """A SQLAlchemy-wrapped SQLite connection must still use the sqlite code path."""
+    import sqlite3 as _sqlite3
+
+    from datagraph.extractors.warehouse_extractor import dbapi_connection
+
+    class FakeFairy:
+        __module__ = "sqlalchemy.pool.base"
+
+        def __init__(self, inner):
+            self.dbapi_connection = inner
+
+    raw = _sqlite3.connect(":memory:")
+    assert isinstance(dbapi_connection(FakeFairy(raw)), _sqlite3.Connection)
+    raw.close()

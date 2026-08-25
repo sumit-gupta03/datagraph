@@ -32,16 +32,10 @@ _SUPPORTED = ("snowflake", "bigquery", "postgres", "postgresql", "mysql")
 
 
 def detect_dialect(connection) -> str:
-    """Best-effort engine name from the DB-API connection's module."""
-    module = type(connection).__module__.lower()
-    for name, dialect in (
-        ("snowflake", "snowflake"), ("psycopg", "postgres"), ("pg8000", "postgres"),
-        ("mysql", "mysql"), ("pymysql", "mysql"), ("bigquery", "bigquery"),
-        ("duckdb", "duckdb"), ("sqlite3", "sqlite"),
-    ):
-        if name in module:
-            return dialect
-    return module.split(".")[0]
+    """Engine name behind a connection, seeing through SQLAlchemy's wrappers."""
+    from .extractors.warehouse_extractor import engine_name
+
+    return engine_name(connection)
 
 
 def _sql(dialect: str, days: int, bigquery_region: str = "region-us") -> Optional[str]:

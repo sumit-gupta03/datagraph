@@ -44,7 +44,9 @@ def profile_warehouse(
         from .extractors.warehouse_extractor import connect
 
         connection = connect(connection)
-    is_sqlite = isinstance(connection, sqlite3.Connection)
+    from .extractors.warehouse_extractor import dbapi_connection
+
+    is_sqlite = isinstance(dbapi_connection(connection), sqlite3.Connection)
     quote = _quote_char(connection)   # MySQL uses backticks; everyone else double quotes
     targets = _targets(graph, tables)
     results: Dict[str, Dict] = {}
@@ -131,9 +133,14 @@ def _targets(graph: ImpactGraph, tables) -> List[str]:
 
 
 def _quote_char(connection) -> str:
-    """MySQL accepts double-quoted identifiers only when ANSI_QUOTES is set; backticks always work."""
-    module = type(connection).__module__.lower()
-    return '`' if any(k in module for k in ('mysql', 'pymysql', 'mariadb')) else '"'
+    """MySQL accepts double-quoted identifiers only when ANSI_QUOTES is set; backticks always work.
+
+    Getting this wrong is silent, not loud: MySQL reads a double-quoted identifier as a string
+    literal, so every statistic comes back constant instead of raising.
+    """
+    from .extractors.warehouse_extractor import engine_name
+
+    return "`" if engine_name(connection) == "mysql" else chr(34)
 
 
 def _relation_sql(tid: str, node, is_sqlite: bool, quote: str = '"') -> str:

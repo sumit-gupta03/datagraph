@@ -64,6 +64,44 @@ def connect(dsn: str):
     return create_engine(dsn).raw_connection()
 
 
+def dbapi_connection(connection):
+    """Unwrap SQLAlchemy's connection wrappers down to the real DB-API connection.
+
+    ``connect()`` returns ``engine.raw_connection()``, whose type lives in ``sqlalchemy.pool`` -
+    so anything that sniffs the driver from ``type(conn).__module__`` sees "sqlalchemy" and guesses
+    wrong. That silently broke MySQL identifier quoting and all usage statistics.
+    """
+    seen = set()
+    current = connection
+    for _ in range(5):
+        module = type(current).__module__.lower()
+        if not module.startswith("sqlalchemy"):
+            return current
+        for attribute in ("dbapi_connection", "driver_connection", "connection", "_dbapi_connection"):
+            nxt = getattr(current, attribute, None)
+            if nxt is not None and id(nxt) not in seen:
+                seen.add(id(nxt))
+                current = nxt
+                break
+        else:
+            return current
+    return current
+
+
+def engine_name(connection) -> str:
+    """Driver/engine name behind a (possibly wrapped) connection: sqlite, postgres, mysql, ..."""
+    module = type(dbapi_connection(connection)).__module__.lower()
+    for needle, name in (
+        ("snowflake", "snowflake"), ("psycopg", "postgres"), ("pg8000", "postgres"),
+        ("pymysql", "mysql"), ("mysql", "mysql"), ("mariadb", "mysql"),
+        ("bigquery", "bigquery"), ("duckdb", "duckdb"), ("sqlite3", "sqlite"),
+        ("pyodbc", "sqlserver"), ("redshift", "redshift"),
+    ):
+        if needle in module:
+            return name
+    return module.split(".")[0]
+
+
 class WarehouseExtractor(Extractor):
     name = "warehouse"
 
