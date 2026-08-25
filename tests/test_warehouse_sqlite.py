@@ -121,3 +121,30 @@ def test_duckdb_schema_has_no_system_objects(tmp_path):
     ids = {n.id for n in graph.nodes(NodeType.TABLE) + graph.nodes(NodeType.VIEW)}
     assert any(i.endswith("main.dim_customer") for i in ids)
     assert not [i for i in ids if "duckdb_" in i or "sqlite_" in i or i.startswith("table:system.")]
+
+
+def test_mysql_catalog_placeholder_and_quoting():
+    """MySQL reports table_catalog='def' and rejects double-quoted identifiers - both were bugs
+    found by the live-engine CI job."""
+    from datagraph.extractors.warehouse_extractor import _table_id
+    from datagraph.profiling import _q, _quote_char, _relation_sql
+
+    # 'def' is a placeholder, not a catalog
+    assert _table_id("def", "analytics", "orders") == "table:analytics.orders"
+    assert _table_id("prod", "analytics", "orders") == "table:prod.analytics.orders"
+    assert _table_id(None, "analytics", "orders") == "table:analytics.orders"
+
+    class FakeMySQL:
+        __module__ = "pymysql.connections"
+
+    class FakePostgres:
+        __module__ = "psycopg2.extensions"
+
+    assert _quote_char(FakeMySQL()) == "`"
+    assert _quote_char(FakePostgres()) == '"'
+    assert _q("Mixed Case", "`") == "`Mixed Case`"
+    assert _q('we"ird') == '"we""ird"'
+    assert _q("back`tick", "`") == "`back``tick`"
+    # mixed-case parts are quoted with the engine's own character
+    assert _relation_sql("table:analytics.Orders", None, False, "`") == "analytics.`Orders`"
+    assert _relation_sql("table:analytics.orders", None, False, "`") == "analytics.orders"

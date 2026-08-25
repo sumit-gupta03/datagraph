@@ -45,6 +45,7 @@ def profile_warehouse(
 
         connection = connect(connection)
     is_sqlite = isinstance(connection, sqlite3.Connection)
+    quote = _quote_char(connection)   # MySQL uses backticks; everyone else double quotes
     targets = _targets(graph, tables)
     results: Dict[str, Dict] = {}
     now = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
@@ -52,7 +53,7 @@ def profile_warehouse(
         node = graph.get_node(tid)
         if node is None:
             continue
-        rel = _relation_sql(tid, node, is_sqlite)
+        rel = _relation_sql(tid, node, is_sqlite, quote)
         cols = [c for c in graph.nodes(NodeType.COLUMN) if c.meta.get("parent") == tid][:max_columns]
         prof: Dict = {"profiled_at": now, "sample": sample}
         try:
@@ -68,7 +69,7 @@ def profile_warehouse(
             names = [c.name for c in cols]
             exprs = []
             for n in names:
-                q = _q(n)
+                q = _q(n, quote)
                 exprs += [f"COUNT({q})", f"COUNT(DISTINCT {q})", f"MIN({q})", f"MAX({q})"]
             sql = f"SELECT COUNT(*), {', '.join(exprs)} FROM (SELECT * FROM {rel} LIMIT {int(sample)}) t"
             try:
@@ -98,7 +99,7 @@ def profile_warehouse(
                 for col in cols[:20]:
                     if is_sensitive_column(col.name):
                         continue
-                    q = _q(col.name)
+                    q = _q(col.name, quote)
                     try:
                         rows = _rows(connection, f"SELECT {q}, COUNT(*) AS c FROM (SELECT {q} FROM {rel} LIMIT {int(sample)}) t GROUP BY {q} ORDER BY c DESC LIMIT 5")
                         col.meta.setdefault("profile", {})["top_values"] = [[_jsonable(v), c] for v, c in rows]
@@ -129,15 +130,21 @@ def _targets(graph: ImpactGraph, tables) -> List[str]:
             and n.meta.get("source") in ("warehouse", "sqlite")]
 
 
-def _relation_sql(tid: str, node, is_sqlite: bool) -> str:
+def _quote_char(connection) -> str:
+    """MySQL accepts double-quoted identifiers only when ANSI_QUOTES is set; backticks always work."""
+    module = type(connection).__module__.lower()
+    return '`' if any(k in module for k in ('mysql', 'pymysql', 'mariadb')) else '"'
+
+
+def _relation_sql(tid: str, node, is_sqlite: bool, quote: str = '"') -> str:
     bare = tid.split(":", 1)[1]
     if is_sqlite:
-        return _q(bare.split(".")[-1])
-    return ".".join(_q(p) if not p.islower() else p for p in bare.split("."))  # lower-case parts unquoted (case-insensitive engines)
+        return _q(bare.split(".")[-1], quote)
+    return ".".join(_q(p, quote) if not p.islower() else p for p in bare.split("."))  # lower-case needs no quoting
 
 
-def _q(name: str) -> str:
-    return '"' + str(name).replace('"', '""') + '"'
+def _q(name: str, quote: str = '"') -> str:
+    return quote + str(name).replace(quote, quote * 2) + quote
 
 
 def _scalar(con, sql):

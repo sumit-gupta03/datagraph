@@ -209,7 +209,13 @@ class WarehouseExtractor(Extractor):
 # ----------------------------------------------------------------- helpers
 
 
+#: MySQL puts the literal string 'def' in table_catalog for every row - it is not a real catalog
+_PLACEHOLDER_CATALOGS = {"def", "", "none", "null"}
+
+
 def _table_id(catalog, schema, name) -> str:
+    if catalog is not None and str(catalog).strip().lower() in _PLACEHOLDER_CATALOGS:
+        catalog = None
     parts = [str(p).lower() for p in (catalog, schema, name) if p]
     return "table:" + ".".join(parts)
 
