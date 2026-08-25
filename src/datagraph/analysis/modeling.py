@@ -17,7 +17,7 @@ from names (``orders.customer_id`` -> ``customers``), tagged ``inferred`` so you
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from ..graph import EdgeType, ImpactGraph, Node, NodeType
 

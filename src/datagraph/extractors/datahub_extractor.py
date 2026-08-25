@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.request
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Optional
 
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor

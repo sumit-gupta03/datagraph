@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from .analysis import analyze_impact
 from .analysis.relationships import relationships
 from .graph import EXTRACTED, ImpactGraph, NodeType
 from .profiling import profile_summary
+from .usage import unused_tables, usage_summary
 from .security import sanitize_text
 
 _PAGE_TYPES = {
@@ -87,6 +88,9 @@ def context(graph: ImpactGraph, node_id: str, depth: int = 2, max_items: int = 4
     ps = profile_summary(node)
     if ps:
         lines.append(f"profile: {ps}")
+    us = usage_summary(node)
+    if us:
+        lines.append(f"usage: {us}")
     if node.type in _MODEL_TYPES:
         from .analysis.modeling import classify_tables
 
@@ -250,6 +254,14 @@ def build_wiki(graph: ImpactGraph, out_dir, title: str = "datagraph knowledge ba
         rep.append("## Stale sources (dbt source freshness)")
         for n in stale[:20]:
             rep.append(f"- `{n.id}` - {n.meta['status']['freshness']}")
+
+    never_queried = unused_tables(graph)
+    if never_queried:
+        rep.append("")
+        rep.append(f"## Never queried ({len(never_queried)}) - from the engine's query log")
+        for row in never_queried[:20]:
+            verdict = "safe to drop" if row["safe_to_drop"] else f"{len(row['downstream'])} downstream"
+            rep.append(f"- `{row['id']}` - {verdict}")
 
     doms = _domains(graph)
     if doms:

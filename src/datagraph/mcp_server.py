@@ -112,7 +112,16 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
 
         return pii_report(_graph())
 
-    return {"impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
+    def usage() -> dict:
+        """Query-log usage per table (when it was collected) and the tables nobody queries -
+        the deletion candidates in a brownfield warehouse."""
+        from .usage import unused_tables
+
+        g = _graph()
+        return {"unused": unused_tables(g),
+                "usage": {n.id: n.meta["usage"] for n in g.nodes() if n.meta.get("usage")}}
+
+    return {"usage": usage, "impact": impact, "diff": diff, "find_nodes": find_nodes, "paths": paths, "hotspots": hotspots,
             "lineage": lineage, "relationships": relationships, "context": context, "model": model,
             "search": search, "sensitive_data": sensitive_data}
 

@@ -41,9 +41,9 @@ from __future__ import annotations
 import fnmatch
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
-from .graph import ImpactGraph, NodeType
+from .graph import ImpactGraph
 from .security import sanitize_text
 
 

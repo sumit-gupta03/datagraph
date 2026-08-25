@@ -34,6 +34,8 @@ relationships as a fallback and those are tagged `llm`. You explain the output â
    - **Find something / what is it called?** `datagraph search <text> [--domain D] [--type T] [--term X]`
    - **Business terms / definitions:** `datagraph glossary --json`
    - **Where is personal data and what is exposed to it?** `datagraph pii --json`
+   - **What is queried / what can we delete?** `datagraph usage --warehouse DSN --unused-only`
+   - **Let the user browse:** `datagraph serve` (local read-only viewer on 127.0.0.1)
    - **Data stats (row counts, nulls, distincts):** `datagraph profile --warehouse DSN` first, then the above show them
    - **Show a picture:** `datagraph html dbt:customer -o impact.html`, `datagraph lineage X --html lineage.html`,
      `datagraph html --all -o graph.html`

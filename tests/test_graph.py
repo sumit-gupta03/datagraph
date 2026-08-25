@@ -1,6 +1,6 @@
 import json
 
-from datagraph import Edge, EdgeType, ImpactGraph, Node, NodeType
+from datagraph import Edge, EdgeType, ImpactGraph
 from datagraph.analysis import analyze_impact
 
 

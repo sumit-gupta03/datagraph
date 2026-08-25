@@ -184,6 +184,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_an.add_argument("--dialect", default=None, help="SQL dialect for view definitions (snowflake, postgres, bigquery, ...)")
     p_an.add_argument("-o", "--output", default="datagraph-out", help="Output folder")
     p_an.add_argument("--no-profile", action="store_true", help="Skip data profiling (metadata only)")
+    p_an.add_argument("--usage", action="store_true", help="Also read the engine's query log (Snowflake/BigQuery/Postgres/MySQL)")
     p_an.add_argument("--sample", type=int, default=100000, help="Rows sampled per table for profiling")
     p_an.add_argument("--no-top-values", action="store_true")
     p_an.add_argument("--no-inferred", action="store_true", help="Declared foreign keys only for the model")
@@ -212,7 +213,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_gloss.add_argument("--graph", default=DEFAULT_GRAPH)
     p_gloss.add_argument("--json", action="store_true")
 
-    p_plug = sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
+    p_serve = sub.add_parser("serve", help="Browse the graph in a local read-only web viewer (search, assets, lineage)")
+    p_serve.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_serve.add_argument("--host", default="127.0.0.1", help="Bind address (default: loopback only)")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument("--title", default="datagraph")
+    p_serve.add_argument("--open", dest="open_browser", action="store_true", help="Open a browser window")
+
+    p_usage = sub.add_parser("usage", help="Query-log usage: which tables are actually queried, and which are unused")
+    p_usage.add_argument("--warehouse", metavar="DSN", required=True)
+    p_usage.add_argument("--graph", default=DEFAULT_GRAPH)
+    p_usage.add_argument("--days", type=int, default=30, help="Window for engines that have one (Snowflake, BigQuery)")
+    p_usage.add_argument("--dialect", default=None, help="Override engine detection (snowflake|bigquery|postgres|mysql)")
+    p_usage.add_argument("--bigquery-region", default="region-us")
+    p_usage.add_argument("--unused-only", action="store_true", help="List only tables nobody queries")
+    p_usage.add_argument("--json", action="store_true")
+
+    sub.add_parser("plugins", help="List installed extractor plugins (datagraph.extractors entry points)")
 
     p_lin = sub.add_parser("lineage", help="Upstream (where it comes from) and downstream (what it feeds) of a node")
     p_lin.add_argument("node")
@@ -284,6 +301,8 @@ def _dispatch(args: argparse.Namespace) -> int:
         "plugins": _cmd_plugins,
         "model": _cmd_model,
         "search": _cmd_search,
+        "serve": _cmd_serve,
+        "usage": _cmd_usage,
         "pii": _cmd_pii,
         "glossary": _cmd_glossary,
         "analyze": _cmd_analyze,
@@ -738,6 +757,10 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         applied = apply_metadata(graph, load_metadata(args.metadata))
         say(f"metadata: {applied['terms']} term link(s), {applied['domains']} domain assignment(s), "
             f"{applied['deprecations']} deprecation(s)")
+    if getattr(args, "usage", False):
+        from .usage import usage_stats
+
+        usage_stats(connection, graph, days=30, log=say)
     graph.save(out / "datagraph.json")
     rel = relationships(graph, include_columns=True)
     (out / "relationships.json").write_text(json.dumps(rel, indent=2, sort_keys=True, default=str), encoding="utf-8")
@@ -761,6 +784,48 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     say(f"wiki: {stats['pages']} pages")
     say(f"-> {out}/  (datagraph.json, relationships.json, MODEL.md, er-diagram.mmd, lineage.html, wiki/)")
     say("next: datagraph lineage <table> --graph " + str(out / "datagraph.json") + "  |  datagraph context <table> --graph ...  |  datagraph mcp --graph ...")
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from .serve import serve
+
+    if not Path(args.graph).exists():
+        print(f"error: graph file '{args.graph}' not found - run 'datagraph build' first", file=sys.stderr)
+        return 2
+    serve(args.graph, host=args.host, port=args.port, title=args.title, open_browser=args.open_browser)
+    return 0
+
+
+def _cmd_usage(args: argparse.Namespace) -> int:
+    from .extractors.warehouse_extractor import connect
+    from .usage import unused_tables, usage_stats
+
+    graph = _load_graph(args.graph)
+    connection = connect(args.warehouse)
+    results = usage_stats(connection, graph, dialect=args.dialect, days=args.days,
+                          bigquery_region=args.bigquery_region, log=None if args.json else print)
+    graph.save(args.graph)
+    unused = unused_tables(graph)
+    if args.json:
+        print(json.dumps({"usage": results, "unused": unused}, indent=2, sort_keys=True, default=str))
+        return 0
+    if not results:
+        print("no usage information available for this engine")
+        return 0
+    if not args.unused_only:
+        ranked = sorted(results.items(), key=lambda kv: -kv[1].get("queries", 0))
+        print(f"{'queries':>8}  table")
+        for node_id, entry in ranked[:25]:
+            last = f"   last {str(entry['last_query'])[:19]}" if entry.get("last_query") else ""
+            print(f"{entry.get('queries', 0):>8}  {node_id}{last}")
+    if unused:
+        print(chr(10) + "never queried (" + str(len(unused)) + "):")
+        for row in unused[:25]:
+            verdict = "safe to drop (nothing downstream)" if row["safe_to_drop"] else f"{len(row['downstream'])} downstream"
+            rows_txt = f", {row['row_count']} rows" if row.get("row_count") is not None else ""
+            print(f"  {row['id']}{rows_txt} - {verdict}")
+    print(chr(10) + "usage stored in " + str(args.graph))
     return 0
 
 

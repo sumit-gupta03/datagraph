@@ -1,7 +1,6 @@
 import json
 import sqlite3
 
-import pytest
 
 from datagraph import Edge, EdgeType, ImpactGraph, Node, NodeType, WarehouseExtractor, analyze_impact
 from datagraph.cli import main

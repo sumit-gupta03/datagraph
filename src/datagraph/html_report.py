@@ -17,7 +17,7 @@ import json
 from typing import Dict, Iterable, List, Optional
 
 from .analysis import ImpactAnalysis
-from .graph import IMPACT_DIRECTION, INFERRED, ImpactGraph, NodeType
+from .graph import IMPACT_DIRECTION, ImpactGraph, NodeType
 from .profiling import profile_summary
 from .security import escape_script_json
 

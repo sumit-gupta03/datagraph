@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, Union
 
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor

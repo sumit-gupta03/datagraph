@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from datagraph import DbtExtractor, ImpactGraph, Node, NodeType, analyze_impact
+from datagraph import DbtExtractor, analyze_impact
 from datagraph.analysis.discovery import pii_report, search
 from datagraph.cli import main
 from datagraph.knowledge import build_wiki, context

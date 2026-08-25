@@ -194,6 +194,8 @@ Options: `--schemas a,b` · `--database NAME` · `--dialect snowflake|postgres|b
 | `search [QUERY]` | search names, ids, descriptions, columns, owners, tags, glossary terms, domains |
 | `glossary` | business glossary: terms, definitions, assets |
 | `pii` | sensitive-data report: personal data and everything exposed to it |
+| `serve` | local read-only web viewer (search, assets, lineage) |
+| `usage` | query-log usage: what is queried, what nobody queries |
 | `context NODE` | compact knowledge pack for one node |
 | `wiki -o DIR` | Markdown knowledge base + `GRAPH_REPORT.md` + `MODEL.md` + `llms.txt` |
 | `impact NODE` · `diff --repo .` · `paths A B` · `hotspots` | change impact: blast radius, risk, owners, tests; propagation paths; riskiest nodes |
@@ -346,6 +348,45 @@ freshness, and impact analysis warns about them:
 `GRAPH_REPORT.md` gains sections for deprecated assets still in use, failing tests, stale sources, domains,
 the glossary and a sensitive-data map; the wiki index groups assets by domain; MCP gains `search` and
 `sensitive_data` tools.
+
+## Browse it locally: `datagraph serve`
+
+```bash
+datagraph serve --graph datagraph.json --open      # http://127.0.0.1:8765
+```
+
+A single-user, **read-only** browser for the graph, served by Python's own HTTP server - no database,
+no accounts, no write path, no extra dependency. Search as you type, filter by type and domain, open an
+asset to see its full context pack (columns, profile, usage, lineage, risk, SQL), and click through to the
+interactive lineage or whole-graph views. It binds to loopback only unless you pass `--host` (and warns
+if you do), and re-reads the graph file when it changes, so a rebuild in another terminal just needs a refresh.
+
+Routes: `/` · `/api/search` · `/api/node/<id>` · `/api/report` · `/api/model` · `/lineage/<id>` · `/graph`.
+
+## Usage: what is actually queried, and what can be deleted
+
+```bash
+datagraph usage --warehouse "snowflake://..." --days 30
+datagraph usage --warehouse "postgresql+psycopg2://..." --unused-only
+datagraph analyze --warehouse ... --usage            # collect it as part of the standard flow
+```
+
+Reads the engine's own query log - Snowflake `ACCESS_HISTORY`, BigQuery `INFORMATION_SCHEMA.JOBS`,
+PostgreSQL `pg_stat_user_tables`, MySQL `performance_schema` - and attaches counts to the graph. Engines
+without a query log are reported and skipped; a missing grant is reported, never fatal.
+
+The payoff for a brownfield warehouse is the intersection of two signals:
+
+```
+never queried (3):
+  table:legacy_scratch, 0 rows - safe to drop (nothing downstream)
+  table:old_orders_backup, 1.2M rows - safe to drop (nothing downstream)
+  table:stg_legacy - 2 downstream
+```
+
+"Nobody queries it" **and** "nothing depends on it" is the only combination that is actually safe, and
+datagraph is holding both halves. Usage also appears in `context`, the wiki's `GRAPH_REPORT.md`
+("Never queried") and the `usage` MCP tool.
 
 ## Knowledge base & MCP for AI assistants
 
@@ -528,7 +569,9 @@ Everything else — lineage, relationships, profiling, dimensional modelling, wi
 | Deprecation awareness | no | yes | no | yes - warns when a change touches a deprecated asset |
 | Test results / freshness | no | yes (assertions, monitors) | no | imports dbt `run_results.json` / `sources.json` |
 | PII classification | no | yes (AI-assisted, UI) | no | yes (heuristic) + masks values while profiling |
-| Search / discovery | no | yes (org-wide UI) | no | `datagraph search` over one graph |
+| Search / discovery | no | yes (org-wide UI) | no | `datagraph search` + a local read-only viewer (`datagraph serve`) |
+| Usage / popularity stats | no | yes (query-log ingestion) | no | yes - reads the engine's query log directly |
+| Unused-asset detection | no | partial | no | yes - never queried **and** nothing downstream |
 | Governance workflows, RBAC, incidents, monitoring | no | yes | no | **no - deliberately out of scope** |
 | Dimensional modelling | no | no | no | yes (Kimball: facts/dims/bus matrix/SCD/issues, wide-table proposals) |
 | Direction-aware impact + risk + test plan | no | impact view only | no | yes, across code and data (and impactgraph for PRs) |
@@ -561,7 +604,7 @@ which way change flows (`contains`, `writes_to`, `exposes` forward; `calls`, `im
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e ".[dev]"
-pytest            # 156 tests, offline, ~60 s - includes dbt's real jaffle_shop project as a fixture
+pytest            # 164 tests offline + live Postgres/MySQL in CI, ~60 s - includes dbt's real jaffle_shop project as a fixture
 ```
 
 Docs: **`docs/TECHNICAL_REFERENCE.md`** (implementation reference — every module, class and function, with line numbers; also as `.pdf`/`.docx`), `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from

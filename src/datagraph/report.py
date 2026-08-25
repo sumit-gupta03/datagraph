@@ -9,7 +9,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .analysis import ImpactAnalysis
-from .graph import INFERRED, ImpactGraph
+from .graph import ImpactGraph
 
 _RISK_STYLES = {
     "LOW": "green",

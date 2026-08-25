@@ -24,7 +24,7 @@ with ``datagraph html --all`` / ``datagraph relationships`` to display it.
 from __future__ import annotations
 
 import sqlite3
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Sequence
 
 from ..security import escape_literal
 

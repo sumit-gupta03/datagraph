@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from ..graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from .base import Extractor
