@@ -618,6 +618,10 @@ zero). Tagging `vX.Y.Z` builds wheels, creates a GitHub Release and publishes `d
 - Data-quality rule suggestions from profiles + model (uniqueness of keys, referential integrity, freshness SLAs)
 - Incremental per-file rebuilds (today `--update` skips unchanged inputs)
 
+## Authors
+
+Sumit Gupta and Nitish Pradhan.
+
 ## License
 
 MIT
