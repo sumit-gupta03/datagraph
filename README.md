@@ -16,7 +16,8 @@
 ```bash
 pip install "datagraph-core[sql]"
 datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analytics -o out/
-#  -> lineage.html · relationships.json · MODEL.md + er-diagram.mmd · profiles · wiki/ (for AI assistants) · datagraph.json
+#  -> lineage.html · relationships.json · MODEL.md + er-diagram.mmd
+#     profiles · wiki/ (for AI assistants) · datagraph.json
 ```
 
 > **Brownfield data platform, hundreds of tables, no documentation?** One command turns the schema (and dbt / SQL / code if you have them)
@@ -87,12 +88,12 @@ flowchart LR
 ## Install
 
 ```bash
-pip install datagraph-core              # core: graph, warehouse/dbt/code extractors, lineage, profiling, modelling, wiki
-pip install "datagraph-core[sql]"       # + sqlglot: SQL files, view definitions, column-level lineage   (recommended)
-pip install "datagraph-core[mcp]"       # + MCP server for Claude Code / Claude Desktop / Cursor
-pip install "datagraph-core[ai]"        # + Anthropic Claude for explanations / LLM lineage fallback
-pip install "datagraph-core[bedrock]"   # + Amazon Bedrock (Nova, Claude on Bedrock, Llama ...) for the same; OpenAI-compatible needs nothing extra
-pip install "datagraph-core[all]"       # everything (also PyYAML for YAML lineage files / serverless.yml)
+pip install datagraph-core              # graph, extractors, lineage, profiling, modelling
+pip install "datagraph-core[sql]"       # + sqlglot: SQL and column lineage (recommended)
+pip install "datagraph-core[mcp]"       # + MCP server for coding assistants
+pip install "datagraph-core[ai]"        # + Anthropic Claude (explanations, fallback)
+pip install "datagraph-core[bedrock]"   # + Amazon Bedrock (Nova, Claude, Llama)
+pip install "datagraph-core[all]"       # everything (adds PyYAML, mcp, boto3)
 ```
 
 The PyPI distribution is **`datagraph-core`** (the bare name `datagraph` is not allowed on PyPI); the import name, CLI and MCP server are all `datagraph`:
@@ -105,8 +106,8 @@ From source: `pip install "datagraph-core[sql] @ git+https://github.com/sumit-gu
 ## The standard flow: connection in → lineage, profiling, model out
 
 ```bash
-datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analytics,raw -o out/
-datagraph analyze --warehouse warehouse.db -o out/            # a SQLite / DuckDB file works too
+datagraph analyze --warehouse "snowflake://user:pw@account/db" -o out/
+datagraph analyze --warehouse warehouse.db -o out/     # SQLite / DuckDB file
 ```
 
 ```mermaid
@@ -136,11 +137,13 @@ One command runs the standard sequence (use a **read-only** database role; the p
 Then ask questions against the saved graph:
 
 ```bash
-datagraph lineage fact_sales --graph out/datagraph.json            # upstream / downstream (add --html lineage.html)
+datagraph lineage fact_sales --graph out/datagraph.json     # upstream + downstream
 datagraph relationships --graph out/datagraph.json --search customer
-datagraph context dim_customer --graph out/datagraph.json          # compact knowledge pack for an assistant
+# compact knowledge pack for an assistant
+datagraph context dim_customer --graph out/datagraph.json
 datagraph model --graph out/datagraph.json --from-table wide_orders
-datagraph mcp --graph out/datagraph.json                           # MCP server for your coding assistant
+# MCP server for your coding assistant
+datagraph mcp --graph out/datagraph.json
 ```
 
 Options: `--schemas a,b` · `--database NAME` · `--dialect snowflake|postgres|bigquery|…` (for view SQL) · `--no-profile` (metadata only) ·
@@ -197,9 +200,10 @@ Every command takes `--graph PATH` (default `datagraph.json`), most take `--json
 ## Dimensional modelling
 
 ```bash
-datagraph model                                   # classify + star schema + issues + Mermaid ER diagram (Markdown to stdout)
+datagraph model                      # classification, star schema, issues, ER diagram
 datagraph model --markdown MODEL.md --mermaid er.mmd --json
-datagraph model --from-table wide_orders          # propose fact + dimensions from one flat / wide table
+# propose fact + dimensions from one flat / wide table
+datagraph model --from-table wide_orders
 datagraph model --no-inferred                     # declared foreign keys only
 ```
 
@@ -251,7 +255,8 @@ erDiagram
 
 ### table:fact_sales - fact (confidence 0.95)
 - grain: date_key, customer_id, product_id        - measures: amount, quantity
-- Kimball: process `sales` -> grain: one row per date_key x customer_id x product_id -> 3 dimension(s) -> 2 fact measure(s)
+- Kimball: process `sales` -> grain: date_key x customer_id x product_id
+           -> 3 dimensions -> 2 measures
 
 ## Dimensions
 - dim_customer - key customer_id, 4 attribute(s), used by fact_sales; SCD type 1
@@ -278,7 +283,7 @@ Standard Kimball approach, computed deterministically and **explained** (every c
 ## Data profiling
 
 ```bash
-datagraph profile --warehouse prod.db [--tables customers,orders] [--sample 100000] [--no-top-values]
+datagraph profile --warehouse prod.db [--tables customers,orders] [--sample 100000]
 ```
 
 Per table: row count, freshness (max of date-like columns); per column: null %, distinct, min/max, top values (sampled). Results are
@@ -288,41 +293,51 @@ data-aware (empty tables count half, >1M-row tables 1.5×) and feed the optional
 
 ## Governance: glossary, domains, deprecation, test results, PII
 
-Catalog concepts, kept in a file you commit instead of a database behind a UI:
+Catalog concepts live in one file you commit - no database, no UI behind them:
+
+| Key | What it does |
+|---|---|
+| `glossary` | business terms and definitions, attached to tables or columns |
+| `domains` | group assets by product or team (`*` and `?` wildcards) |
+| `deprecations` | mark an asset dead, with a reason and a replacement |
+| `owners` | fill in or override ownership |
 
 ```yaml
 # datagraph.yml   ->   datagraph build ... --metadata datagraph.yml
-version: 1
 glossary:
   - term: Customer PII
-    definition: Personal data about an identified or identifiable customer.
-    owner: privacy-office
+    definition: Personal data about an identified customer.
     applies_to: ["column:dim_customer.email", "column:dim_customer.name"]
 domains:
   - name: Finance
     owner: finance
-    assets: ["dbt:fact_*", "table:prod.analytics.*"]        # * and ? wildcards
+    assets: ["dbt:fact_*", "table:prod.analytics.*"]
 deprecations:
   - asset: dbt:legacy_customer
-    reason: Superseded by dim_customer.
     replacement: dbt:dim_customer
-owners:
-  "table:prod.raw.events": ingestion-team
 ```
 
-The same concepts are also read straight from dbt (`meta.domain` / `group`, `meta.terms`,
-`meta.deprecated` or a `deprecated` tag), so a project that already annotates its models needs no file.
+A dbt project needs no file at all: `meta.domain`, `group`, `meta.terms` and `meta.deprecated`
+(or a `deprecated` tag) are read straight from the manifest.
 
 ```bash
-datagraph search customer                    # names, ids, descriptions, COLUMN names, owners, tags, terms, domains
+# names, ids, descriptions, columns, owners, tags, terms
+datagraph search customer
 datagraph search --domain Finance --type dbt_model
-datagraph glossary                           # terms, definitions, and the assets carrying them
-datagraph pii                                # where personal data lives, and which dashboards/APIs are exposed to it
-datagraph build --dbt-manifest target/manifest.json                 --dbt-run-results target/run_results.json                 --dbt-sources target/sources.json     # test outcomes + source freshness (auto-detected)
+datagraph glossary                   # terms, definitions, and the assets carrying them
+datagraph pii                        # personal data, and what is exposed to it
 ```
 
-With `run_results.json` / `sources.json` present, every model carries its test outcomes and every source its
-freshness, and impact analysis warns about them:
+Test outcomes and source freshness come from dbt's own artifacts, auto-detected next to the
+manifest or passed explicitly:
+
+```bash
+datagraph build --dbt-manifest target/manifest.json \
+                --dbt-run-results target/run_results.json \
+                --dbt-sources target/sources.json
+```
+
+Impact analysis then warns about what it finds:
 
 ```
 ! 'dim_customer' has 1 failing dbt test(s): not_null_dim_customer_customer_id
@@ -330,9 +345,9 @@ freshness, and impact analysis warns about them:
 ! 'customer' is deprecated - use dbt:dim_customer instead
 ```
 
-`GRAPH_REPORT.md` gains sections for deprecated assets still in use, failing tests, stale sources, domains,
-the glossary and a sensitive-data map; the wiki index groups assets by domain; MCP gains `search` and
-`sensitive_data` tools.
+The same facts reach `GRAPH_REPORT.md` (deprecated assets still in use, failing tests, stale
+sources, domains, glossary, sensitive-data map), the wiki index (grouped by domain) and MCP
+(`search` and `sensitive_data` tools).
 
 ## Browse it locally: `datagraph serve`
 
@@ -353,7 +368,8 @@ Routes: `/` · `/api/search` · `/api/node/<id>` · `/api/report` · `/api/model
 ```bash
 datagraph usage --warehouse "snowflake://..." --days 30
 datagraph usage --warehouse "postgresql+psycopg2://..." --unused-only
-datagraph analyze --warehouse ... --usage            # collect it as part of the standard flow
+# collect it as part of the standard flow
+datagraph analyze --warehouse ... --usage
 ```
 
 Reads the engine's own query log - Snowflake `ACCESS_HISTORY`, BigQuery `INFORMATION_SCHEMA.JOBS`,
@@ -376,10 +392,10 @@ datagraph is holding both halves. Usage also appears in `context`, the wiki's `G
 ## Knowledge base & MCP for AI assistants
 
 ```bash
-datagraph context dim_customer        # description, owner, columns (+type, pk, profile, where each column comes from),
-                                      # upstream, downstream, relationships, dbt tests, modelling role,
-                                      # risk-if-changed + test plan, and the SQL that builds it
-datagraph wiki -o kb/                 # index.md, nodes/*.md (cross-linked), GRAPH_REPORT.md, MODEL.md, llms.txt
+datagraph context dim_customer       # owner, columns (+type, pk, profile, sources),
+                                     # upstream, downstream, relationships, tests,
+                                     # risk if changed, test plan, and the SQL
+datagraph wiki -o kb/                # index.md, nodes/*.md, GRAPH_REPORT.md, llms.txt
 ```
 
 `GRAPH_REPORT.md` lists hotspots, high-impact dbt models without tests, ownerless nodes, roots and leaves. Everything is generated
@@ -421,7 +437,8 @@ flowchart LR
 ```
 
 ```bash
-datagraph impact dbt:customer                    # a model / table / column / function / task
+# a model / table / column / function / task
+datagraph impact dbt:customer
 datagraph diff --repo . --graph datagraph.json   # what my uncommitted change can break
 datagraph paths dbt:customer exposure:revenue_report
 datagraph hotspots
@@ -457,8 +474,9 @@ whole API. datagraph = everything data-related; impactgraph = "what breaks if I 
 ## Python API
 
 ```python
-from datagraph import (ImpactGraph, WarehouseExtractor, DbtExtractor, SqlExtractor, PythonExtractor,
-                       AirflowExtractor, LambdaExtractor, JsExtractor, OpenLineageExtractor,
+from datagraph import (ImpactGraph, WarehouseExtractor, DbtExtractor,
+                       SqlExtractor, PythonExtractor, AirflowExtractor,
+                       LambdaExtractor, JsExtractor, OpenLineageExtractor,
                        LineageFileExtractor, DataHubExtractor, analyze_impact,
                        profile_warehouse, star_schema, propose_from_table, classify_tables,
                        context, build_wiki, ExtractorPlugin, register)
@@ -466,18 +484,22 @@ from datagraph import (ImpactGraph, WarehouseExtractor, DbtExtractor, SqlExtract
 # 1. build (any combination; a DSN, a file path or an open DB-API connection)
 graph = ImpactGraph()
 graph.merge(WarehouseExtractor("snowflake://...", schemas=["analytics"]).extract())
-graph.merge(DbtExtractor("target/manifest.json", catalog_path="target/catalog.json").extract())
+graph.merge(DbtExtractor("target/manifest.json").extract())
 graph.merge(PythonExtractor("./src").extract())
 graph.link_table_aliases()
 
 # 2. lineage & relationships
-graph.lineage("table:analytics.dim_customer")             # {'upstream': {...}, 'downstream': {...}}
+# {'upstream': {...}, 'downstream': {...}}
+graph.lineage("table:analytics.dim_customer")
 from datagraph.analysis.relationships import relationships
-relationships(graph)["table_relationships"]               # foreign keys + lineage between tables
+# foreign keys + lineage between tables
+relationships(graph)["table_relationships"]
 
 # 3. profiling, dimensional model, knowledge base
-profile_warehouse("snowflake://...", graph)               # stores node.meta["profile"] (sensitive columns masked)
-model = star_schema(graph)                                # facts, dimensions, bus_matrix, scd, issues
+# stores node.meta["profile"] (sensitive columns masked)
+profile_warehouse("snowflake://...", graph)
+# facts, dimensions, bus_matrix, scd, issues
+model = star_schema(graph)
 from datagraph.analysis.modeling import to_markdown, to_mermaid
 print(to_markdown(model)); print(to_mermaid(model))
 propose_from_table(graph, "wide_orders")                  # star from a flat table
@@ -488,14 +510,18 @@ build_wiki(graph, "kb/")
 analysis = analyze_impact(graph, ["dbt:customer"])
 analysis.risk, analysis.owners, analysis.recommended_tests, analysis.trees
 
-# 5. your own extractor (BI tool, orchestrator, catalog ...) -> also becomes `datagraph build --mytool X`
-register(ExtractorPlugin(name="mytool", factory=MyToolExtractor, help="...", options={"token": "API token"}))
-# or in your package's pyproject:  [project.entry-points."datagraph.extractors"]  mytool = "my_pkg:MyToolExtractor"
+# 5. your own extractor -> also becomes `datagraph build --mytool X`
+register(ExtractorPlugin(name="mytool", factory=MyToolExtractor,
+                         options={"token": "API token"}))
+# or via an entry point:  [project.entry-points."datagraph.extractors"]
+#                         mytool = "my_pkg:MyToolExtractor"
 
 # 6. optional AI (pip install datagraph-core[ai])
 from datagraph.ai import explain_impact, suggest_lineage, apply_suggestions
-print(explain_impact(analysis))                                          # explains; never changes the graph
-apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)     # tagged provenance=llm, excludable
+# explains; never changes the graph
+print(explain_impact(analysis))
+# tagged provenance=llm, excludable
+apply_suggestions(graph, suggest_lineage(graph), min_confidence=0.7)
 ```
 
 ## Optional AI layer and LLM providers
@@ -514,7 +540,7 @@ confidence-gated). Three interchangeable providers; pick with `--provider` or `D
 ```python
 from datagraph.ai import explain_impact, suggest_lineage, BedrockProvider
 print(explain_impact(analysis, provider="bedrock", model="amazon.nova-pro-v1:0"))
-suggest_lineage(graph, provider=BedrockProvider(model="anthropic.claude-3-5-sonnet-20241022-v2:0", region="us-east-1"))
+suggest_lineage(graph, provider=BedrockProvider(model="amazon.nova-pro-v1:0"))
 ```
 
 Tested live on Amazon Bedrock with `amazon.nova-lite-v1:0` (explain + enrich). Bedrock per-model output caps are handled automatically (`DATAGRAPH_LLM_MAX_TOKENS` to override).
@@ -574,9 +600,12 @@ classification is heuristic and always shows its reasons and confidence.
 ## Node ids, provenance, propagation
 
 ```
-table:prod.analytics.customer  column:dim_customer.customer_key   dbt:dim_customer   source:raw.customers
-file:models/customer.sql       func:src/api.py::customers_endpoint   class:src/models.py::Customer
-exposure:revenue_report        job:airflow/load_dim_customer   dag:nightly   task:nightly/build_dim   lambda:GetBookings   api:GET /bookings
+table:prod.analytics.customer  column:dim_customer.customer_key
+dbt:dim_customer               source:raw.customers
+file:models/customer.sql       func:src/api.py::customers_endpoint
+class:src/models.py::Customer
+exposure:revenue_report        job:airflow/load_dim_customer   dag:nightly
+task:nightly/build_dim         lambda:GetBookings                api:GET /bookings
 ```
 
 Every edge carries a provenance — `extracted` (from an artifact), `inferred` (heuristic: name-resolved call, same-name column,
@@ -589,7 +618,8 @@ which way change flows (`contains`, `writes_to`, `exposes` forward; `calls`, `im
 ```bash
 git clone https://github.com/sumit-gupta03/datagraph && cd datagraph
 pip install -e ".[dev]"
-pytest            # 164 tests offline + live Postgres/MySQL in CI, ~60 s - includes dbt's real jaffle_shop project as a fixture
+# 167 tests offline + live Postgres/MySQL in CI (~60 s)
+pytest
 ```
 
 Docs: **`docs/TECHNICAL_REFERENCE.md`** (implementation reference — every module, class and function, with line numbers; also as `.pdf`/`.docx`), `docs/datagraph-documentation.pdf` (how it was built, A to Z) and `docs/datagraph-learning-guide.pdf` (graphs and lineage from
