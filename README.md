@@ -620,7 +620,7 @@ zero). Tagging `vX.Y.Z` builds wheels, creates a GitHub Release and publishes `d
 
 ## Authors
 
-Sumit Gupta and Nitish Pradhan.
+Sumit Kumar Gupta and Nitish Pradhan.
 
 ## License
 
