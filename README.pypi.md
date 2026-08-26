@@ -1,3 +1,5 @@
+<!-- Generated from README.md by scripts/build_pypi_readme.py - do not edit. Mermaid diagrams are replaced by images because PyPI does not render Mermaid. -->
+
 <h1 align="center">datagraph</h1>
 
 <p align="center">
@@ -25,25 +27,8 @@ datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analyti
 
 ## How it works
 
-```mermaid
-flowchart LR
-    IN["INPUTS<br/><br/>warehouse / database<br/>dbt manifest + catalog<br/>SQL files<br/>Python / JS · Airflow · Lambda<br/>OpenLineage · DataHub · plugins"]
-    EX["EXTRACTORS<br/><br/>AST · sqlglot<br/>information_schema<br/>git diff<br/><br/><i>deterministic - no LLM</i>"]
-    G["ONE GRAPH<br/><br/>tables · columns · models<br/>functions · DAG tasks · dashboards<br/><br/><i>every edge tagged<br/>extracted / inferred / llm</i>"]
-    AN["ANALYSES<br/><br/>lineage (table + column)<br/>relationships (FKs, schema map)<br/>profiling (rows, nulls, freshness)<br/>dimensional model (Kimball)<br/>impact (blast radius, risk, tests)"]
-    OUT["OUTPUTS<br/><br/>CLI · JSON · interactive HTML<br/>local viewer (datagraph serve)<br/>wiki · llms.txt · context packs<br/>MCP server<br/>PR comment (impactgraph)"]
-    LLM["optional LLM<br/>Anthropic · Bedrock/Nova · OpenAI-compatible<br/><br/><i>explains results,<br/>never builds the graph</i>"]
+![flowchart LR](https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/diagram-1-36a373b9.png)
 
-    IN ==> EX ==> G ==> AN ==> OUT
-    LLM -.-> OUT
-
-    classDef stage fill:#eef4f4,stroke:#0e6f76,stroke-width:1.5px,color:#14181c
-    classDef core fill:#0e6f76,stroke:#0e6f76,color:#ffffff
-    classDef aside fill:#faf3ea,stroke:#a75a17,color:#3d2b16,stroke-dasharray:4 3
-    class IN,EX,AN,OUT stage
-    class G core
-    class LLM aside
-```
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/lineage-jaffle-customers.png" alt="Lineage of the customers model in dbt's jaffle_shop project" width="900"><br>
@@ -109,17 +94,8 @@ datagraph analyze --warehouse "snowflake://user:pw@account/db" --schemas analyti
 datagraph analyze --warehouse warehouse.db -o out/            # a SQLite / DuckDB file works too
 ```
 
-```mermaid
-flowchart LR
-    A["🔌 connect<br/>(read-only role)"] --> B["📐 schema<br/>tables · columns · PK/FK · views"]
-    B --> C["🕸️ graph<br/>datagraph.json"]
-    C --> D["🔗 relationships.json"]
-    C --> E["📊 profiling<br/>rows · nulls · distinct · freshness<br/>(sensitive columns masked)"]
-    C --> F["⭐ Kimball model<br/>MODEL.md · model.json · er-diagram.mmd"]
-    C --> G["🖼️ lineage.html"]
-    C --> H["📚 wiki/ + llms.txt<br/>for AI assistants"]
-    H --> I["🤖 datagraph mcp<br/>Claude Code · Cursor"]
-```
+![flowchart LR](https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/diagram-2-cc74fd49.png)
+
 
 One command runs the standard sequence (use a **read-only** database role; the password is never stored or logged):
 
@@ -205,41 +181,8 @@ datagraph model --no-inferred                     # declared foreign keys only
 
 Real output of `datagraph model --mermaid` on a small warehouse (fact + three dimensions, SCD type 2 detected on `dim_product`):
 
-```mermaid
-erDiagram
-  fact_sales {
-    numeric amount
-    key customer_id FK
-    key date_key FK
-    key product_id FK
-    numeric quantity
-    key sale_id PK
-  }
-  dim_customer {
-    key customer_id PK
-    string country
-    string email
-    string name
-    string updated_at
-  }
-  dim_product {
-    key product_id PK
-    string category
-    string is_current
-    string product_name
-    string valid_from
-    string valid_to
-  }
-  dim_date {
-    key date_key PK
-    string full_date
-    string month
-    string year
-  }
-  fact_sales }o--|| dim_customer : "customer_id"
-  fact_sales }o--|| dim_product : "product_id"
-  fact_sales }o--|| dim_date : "date_key"
-```
+![erDiagram](https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/diagram-3-9629b1a9.png)
+
 
 …and the matching report:
 
@@ -408,17 +351,8 @@ fact_booking come from?"*, *"how are these tables related?"*, *"what is the dime
 
 ## Impact analysis & the impactgraph companion
 
-```mermaid
-flowchart LR
-    classDef changed fill:#ffe0b2,stroke:#e65100,stroke-width:2px
-    classDef hit fill:#fde2e2,stroke:#c62828
-    F["func load_customers()<br/><i>git diff</i>"]:::changed -->|writes_to| T["table analytics.customer"]:::hit
-    T -->|depends_on ⟲| M1["dbt dim_customer"]:::hit
-    M1 -->|depends_on ⟲| M2["dbt fact_booking"]:::hit
-    M2 -->|exposes| D1["📊 revenue_report<br/>owner: finance"]:::hit
-    M2 -->|exposes| D2["📊 customer_dashboard<br/>owner: growth"]:::hit
-    M2 -.->|"risk HIGH · notify finance, growth<br/>tests: pytest -k load_customers · dbt build --select dim_customer+"| R(( ))
-```
+![flowchart LR](https://raw.githubusercontent.com/sumit-gupta03/datagraph/main/docs/images/diagram-4-4b8d80d0.png)
+
 
 ```bash
 datagraph impact dbt:customer                    # a model / table / column / function / task

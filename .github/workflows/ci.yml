@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: README for PyPI is current
+        run: python scripts/build_pypi_readme.py --check
       - name: Build sdist and wheel
         run: |
           python -m pip install build
