@@ -6,6 +6,7 @@ import pytest
 
 from datagraph import DbtExtractor, WarehouseExtractor, classify_tables, propose_from_table, star_schema
 from datagraph.analysis.modeling import fk_links, to_markdown, to_mermaid
+from datagraph.graph import Edge, EdgeType, ImpactGraph, Node, NodeType
 from datagraph.cli import main
 from datagraph.knowledge import build_wiki, context
 from datagraph.mcp_server import build_tools
@@ -120,3 +121,29 @@ def test_model_cli_wiki_context_mcp(star_db, tmp_path, capsys):
     assert "mermaid" in m and any(f["id"] == "table:fact_sales" for f in m["facts"])
     p = tools["model"](from_table="wide_orders")
     assert p["fact"]["name"] == "fact_wide_orders"
+
+
+def test_alias_nodes_are_not_reported_as_unclassifiable():
+    """A view's short name for a table is not a second table to complain about.
+
+    `link_table_aliases` adds `table:fact_sales` beside `table:prod.public.fact_sales` so impact
+    crosses both spellings. Classifying the alias produced "2 table(s) could not be classified"
+    against tables the user never wrote — noise at the top of every model report.
+    """
+    from datagraph.analysis.modeling import classify_tables, star_schema
+
+    graph = ImpactGraph()
+    graph.add_node(Node(id="table:prod.public.dim_customer", type=NodeType.TABLE,
+                        name="prod.public.dim_customer", meta={"source": "warehouse"}))
+    graph.add_node(Node(id="column:prod.public.dim_customer.customer_id", type=NodeType.COLUMN,
+                        name="customer_id", meta={"parent": "table:prod.public.dim_customer",
+                                                  "data_type": "integer", "primary_key": True}))
+    graph.add_edge(Edge(src="table:prod.public.dim_customer",
+                        dst="column:prod.public.dim_customer.customer_id", type=EdgeType.CONTAINS))
+    graph.add_node(Node(id="table:dim_customer", type=NodeType.TABLE, name="dim_customer"))
+    assert graph.link_table_aliases() == 1
+
+    classified = classify_tables(graph)
+    assert "table:dim_customer" not in classified
+    assert "table:prod.public.dim_customer" in classified
+    assert not [i for i in star_schema(graph)["issues"] if "could not be classified" in i]

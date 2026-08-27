@@ -199,3 +199,31 @@ def test_sqlite_detected_through_a_wrapper(tmp_path):
     raw = _sqlite3.connect(":memory:")
     assert isinstance(dbapi_connection(FakeFairy(raw)), _sqlite3.Connection)
     raw.close()
+
+
+def test_sqlglot_dialect_is_inferred_from_the_connection():
+    """View lineage is parsed with the engine's own dialect, or it silently disappears.
+
+    MySQL quotes identifiers with backticks. Parsed as generic SQL, every MySQL view definition
+    fails on its first token - and because an unparseable view is not a reason to fail an
+    extraction, the failure shows up as *missing lineage* rather than as an error.
+    """
+    import sqlite3
+
+    from datagraph.extractors.warehouse_extractor import WarehouseExtractor, sqlglot_dialect
+
+    connection = sqlite3.connect(":memory:")
+    assert sqlglot_dialect(connection) == "sqlite"
+    assert WarehouseExtractor(connection).dialect == "sqlite"
+    # an explicit dialect always wins
+    assert WarehouseExtractor(connection, dialect="duckdb").dialect == "duckdb"
+
+
+def test_backtick_view_sql_needs_the_mysql_dialect():
+    """The parse that was failing, pinned directly - no MySQL server required."""
+    sqlglot = pytest.importorskip("sqlglot")
+
+    mysql_view = "select `c`.`country` AS `country` from `shop`.`dim_customer` `c`"
+    with pytest.raises(Exception):
+        sqlglot.parse_one(mysql_view)
+    assert sqlglot.parse_one(mysql_view, read="mysql") is not None

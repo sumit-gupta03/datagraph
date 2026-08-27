@@ -58,3 +58,17 @@ def test_install_hook(tmp_path):
     path = maintenance.install_hook(str(tmp_path), "datagraph build --repo . --update")
     assert path.exists()
     assert "datagraph build" in path.read_text(encoding="utf-8")
+
+
+def test_mcp_server_class_resolves_on_any_sdk_version():
+    """`datagraph mcp` must work on mcp 1.x and 2.x.
+
+    mcp 2.0 renamed FastMCP to MCPServer; the studio hands users a config that launches this
+    server, so a rename in an optional dependency must not turn into a broken command.
+    """
+    pytest.importorskip("mcp")
+    from datagraph.mcp_server import _server_class
+
+    cls = _server_class()
+    assert hasattr(cls, "tool")
+    assert hasattr(cls, "run")

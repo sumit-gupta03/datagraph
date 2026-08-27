@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datagraph-core"
-version = "0.10.6"
+version = "0.10.7"
 description = "AI-powered Change Impact Graph for data and code systems: answer 'if I change this, what can break?'"
 readme = "README.pypi.md"   # generated: diagrams as images (PyPI cannot render Mermaid)
 requires-python = ">=3.9"

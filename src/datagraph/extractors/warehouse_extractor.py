@@ -88,6 +88,23 @@ def dbapi_connection(connection):
     return current
 
 
+#: engine name -> the dialect name sqlglot knows it by (identical where omitted)
+_SQLGLOT_DIALECTS = {"postgres": "postgres", "redshift": "redshift", "mysql": "mysql",
+                     "snowflake": "snowflake", "bigquery": "bigquery", "duckdb": "duckdb",
+                     "sqlite": "sqlite", "sqlserver": "tsql"}
+
+
+def sqlglot_dialect(connection) -> Optional[str]:
+    """The sqlglot dialect for a connection, so view SQL parses the way the engine wrote it.
+
+    Without this every dialect is parsed as generic SQL, and MySQL - which quotes identifiers
+    with backticks - fails on the first token of every view definition. The parse error is
+    swallowed by the caller (a view we cannot parse is not a reason to fail an extraction), so
+    the symptom is not an error but *missing lineage*, which is far worse.
+    """
+    return _SQLGLOT_DIALECTS.get(engine_name(connection))
+
+
 def engine_name(connection) -> str:
     """Driver/engine name behind a (possibly wrapped) connection: sqlite, postgres, mysql, ..."""
     module = type(dbapi_connection(connection)).__module__.lower()
@@ -118,7 +135,7 @@ class WarehouseExtractor(Extractor):
         self.connection = connect(connection) if isinstance(connection, str) else connection
         self.database = database
         self.schemas = [s for s in (schemas or [])]
-        self.dialect = dialect
+        self.dialect = dialect or sqlglot_dialect(self.connection)
         self.view_lineage = view_lineage
         self.foreign_keys = foreign_keys
         self.info_schema = info_schema

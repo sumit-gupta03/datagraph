@@ -149,6 +149,22 @@ def fk_links(graph: ImpactGraph, include_inferred: bool = True) -> List[Dict]:
     return links
 
 
+def _is_alias_node(graph: ImpactGraph, node: Node) -> bool:
+    """Is this table node just another spelling of one we already have?
+
+    ``link_table_aliases`` adds a node for the short name a view's SQL used
+    (``fact_sales``) alongside the catalogue's qualified one
+    (``prod.public.fact_sales``), joined by ``via: alias`` edges, so impact
+    propagates across both spellings. It carries no columns of its own, so
+    classifying it can only ever produce "could not be classified" — an issue
+    reported against a table the user never wrote and cannot fix.
+    """
+    if _columns(graph, node.id):
+        return False  # it has columns of its own, so it is the real thing
+    # an inbound `view_definition` edge is what created it, so only outbound edges are evidence
+    return any(e.meta.get("via") == "alias" for e in graph.edges_of(node.id))
+
+
 def classify_tables(graph: ImpactGraph, include_inferred: bool = True) -> Dict[str, Dict]:
     links = fk_links(graph, include_inferred)
     out_links: Dict[str, List[Dict]] = {}
@@ -158,7 +174,7 @@ def classify_tables(graph: ImpactGraph, include_inferred: bool = True) -> Dict[s
         in_links.setdefault(l["to_table"], []).append(l)
     result: Dict[str, Dict] = {}
     for t in graph.nodes():
-        if t.type not in TABLE_TYPES:
+        if t.type not in TABLE_TYPES or _is_alias_node(graph, t):
             continue
         cols = _columns(graph, t.id)
         base = _strip_prefix(_base(t.id))

@@ -126,12 +126,32 @@ def build_tools(graph_path: str) -> Dict[str, Callable]:
             "search": search, "sensitive_data": sensitive_data}
 
 
-def serve(graph_path: str) -> None:
-    try:
+def _server_class():
+    """The MCP SDK's server class, under whichever name this version of ``mcp`` uses.
+
+    ``mcp`` 2.0 renamed ``mcp.server.fastmcp.FastMCP`` to ``mcp.server.mcpserver.MCPServer``.
+    The constructor and the ``tool()`` decorator kept the same shape, so trying both names is
+    the whole compatibility story.
+    """
+    try:  # mcp >= 2
+        from mcp.server.mcpserver import MCPServer
+
+        return MCPServer
+    except ImportError:
+        pass
+    try:  # mcp 1.x
         from mcp.server.fastmcp import FastMCP
+
+        return FastMCP
     except ImportError as e:
-        raise ImportError("The MCP server requires the 'mcp' package: pip install datagraph[mcp]") from e
-    mcp = FastMCP(
+        raise ImportError(
+            "The MCP server requires the 'mcp' package: pip install datagraph-core[mcp]"
+        ) from e
+
+
+def serve(graph_path: str) -> None:
+    server_class = _server_class()
+    mcp = server_class(
         "datagraph",
         instructions=(
             "Read-only tools over a datagraph graph file (deterministic lineage, impact, relationships, "

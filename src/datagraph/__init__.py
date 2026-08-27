@@ -31,7 +31,7 @@ from .extractors import (
     collect_changes,
 )
 
-__version__ = "0.10.6"
+__version__ = "0.10.7"
 
 __all__ = [
     "build_wiki", "context", "profile_warehouse", "apply_metadata", "load_metadata", "glossary_index",
